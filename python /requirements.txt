@@ -1,0 +1,153 @@
+acres==0.2.0
+aiofiles==24.1.0
+anyio==4.7.0
+asitop==0.0.24
+attrs==25.3.0
+beautifulsoup4==4.12.3
+blessed==1.20.0
+boltons @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_f63n9uulmp/croot/boltons_1677628710094/work
+Brotli==1.1.0
+brotlipy==0.7.0
+cachetools==5.4.0
+certifi @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_5d968ni_yn/croot/certifi_1671487774636/work/certifi
+cffi @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ab19r4bji3/croot/cffi_1670423206034/work
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+ci-info==0.3.0
+click==8.1.8
+coloredlogs==15.0.1
+conda==23.3.1
+conda-content-trust @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_11146a2b-93c2-444c-a378-ad4fac363e991s0r1hnp/croots/recipe/conda-content-trust_1658126383571/work
+conda-package-handling @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_5f3f459f9v/croot/conda-package-handling_1672865025324/work
+conda_package_streaming @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_58gpsa_6af/croot/conda-package-streaming_1670508144037/work
+configobj==5.0.9
+configparser==7.1.0
+contourpy==1.3.1
+cryptography @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_a9zjqvif1f/croot/cryptography_1677533099634/work
+cycler==0.12.1
+dashing==0.1.0
+etelemetry==0.3.1
+exceptiongroup==1.2.2
+filelock==3.16.1
+flatbuffers==25.2.10
+fonttools==4.56.0
+frontend==0.0.3
+fsspec==2025.2.0
+gcloud==0.18.3
+google==3.0.0
+google-api-core==2.19.1
+google-api-python-client==2.140.0
+google-auth==2.33.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1
+google-cloud==0.34.0
+googleapis-common-protos==1.63.2
+grpcio==1.71.0
+h11==0.14.0
+httplib2==0.22.0
+huggingface-hub==0.28.1
+humanfriendly==10.0
+idna @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_771olrhiqw/croot/idna_1666125579282/work
+imageio==2.37.0
+importlib_metadata==8.6.1
+importlib_resources==6.5.1
+isodate==0.6.1
+itsdangerous==2.2.0
+Jinja2==3.1.5
+joblib==1.4.2
+jsonpatch @ file:///tmp/build/80754af9/jsonpatch_1615747632069/work
+jsonpointer==2.1
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+kiwisolver==1.4.8
+lazy_loader==0.4
+llvmlite==0.44.0
+looseversion==1.3.0
+lxml==5.3.0
+MarkupSafe==3.0.2
+matplotlib==3.10.0
+mpmath==1.3.0
+mutagen==1.47.0
+networkx==3.4.2
+nibabel==5.3.2
+nipype==1.9.2
+nltk==3.9.1
+numba==0.61.0
+numpy==2.0.1
+oauth2client==4.1.3
+oauthlib==3.2.2
+onnxruntime==1.21.0
+opencv-python==4.10.0.84
+opencv-python-headless==4.11.0.86
+packaging @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_e946luvhc3/croot/packaging_1678965323926/work
+pandas==2.2.2
+pathlib==1.0.1
+pdf2image==1.17.0
+pillow==10.4.0
+platformdirs==4.3.7
+plotly==5.24.1
+pluggy @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_croot-w6jyveby/pluggy_1648109277227/work
+pooch==1.8.2
+proto-plus==1.24.0
+protobuf==5.27.3
+prov==2.0.1
+psutil==5.9.5
+puremagic==1.28
+pyasn1==0.6.0
+pyasn1_modules==0.4.0
+pycosat @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_e9xhel3kyj/croot/pycosat_1666805516297/work
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pycryptodomex==3.20.0
+pydot==3.0.3
+PyMatting==1.1.13
+PyMuPDF==1.25.1
+pyOpenSSL @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_38h4axtq38/croot/pyopenssl_1677607699670/work
+pyparsing==3.1.2
+PyPDF2==3.0.1
+PySocks @ file:///Users/ktietz/ci_310/pysocks_1643961536721/work
+python-dateutil==2.9.0.post0
+pytz==2024.1
+pyxnat==1.6.2
+PyYAML==6.0.2
+rdflib==6.3.2
+referencing==0.36.2
+regex==2024.11.6
+rembg==2.0.65
+requests==2.32.3
+requests-oauthlib==2.0.0
+rpds-py==0.24.0
+rsa==4.9
+ruamel.yaml @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_aeh5mqcw49/croot/ruamel.yaml_1666304555976/work
+ruamel.yaml.clib @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_f64xdg2rww/croot/ruamel.yaml.clib_1666302244208/work
+safetensors==0.5.2
+scikit-image==0.25.2
+scikit-learn==1.6.1
+scipy==1.15.0
+scooby==0.10.1
+sentence-transformers==3.4.1
+simplejson==3.19.3
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+sniffio==1.3.1
+soupsieve==2.5
+starlette==0.45.1
+sympy==1.13.1
+tenacity==9.0.0
+threadpoolctl==3.5.0
+tifffile==2025.3.30
+tokenizers==0.21.0
+toolz @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_362wyqvvgy/croot/toolz_1667464079070/work
+torch==2.6.0
+tqdm @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ac7zic_tin/croot/tqdm_1679561870178/work
+traits==6.4.3
+transformers==4.48.3
+typing_extensions==4.12.2
+tzdata==2024.1
+uritemplate==4.1.1
+urllib3==2.2.2
+uvicorn==0.34.0
+vtk==9.4.2
+wcwidth==0.2.6
+websockets==13.0
+yt-dlp @ git+https://github.com/yt-dlp/yt-dlp@6ca23ffaa4663cb552f937f0b1e9769b66db11bd
+yt-dlp-get-pot==0.3.0
+zipp==3.21.0
+zstandard @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_41b3vxtask/croot/zstandard_1677013668452/work
