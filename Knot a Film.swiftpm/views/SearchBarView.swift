@@ -110,7 +110,9 @@ struct SearchBarView: View {
     
     var body: some View {
         VStack {
-            //self.searchResults
+            if !self.searchText.isEmpty {
+                self.searchResults
+            }
             self.bar
         }
     }

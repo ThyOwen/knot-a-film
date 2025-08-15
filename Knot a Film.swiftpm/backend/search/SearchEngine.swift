@@ -79,10 +79,20 @@ import Accelerate
         )
         
         try await self.databaseActor.withFetchResult(searchMovieDescription) { movies in
-            self.activeSearchMovies = zip(movies, neighbors)
+            
+            let movies = zip(movies, neighbors)
                 .map { ($0, $1.1) }
-                .sorted { $0.1 < $1.1 }
+                .sorted { leftMovie, rightMovie in
+                    if leftMovie.0.title.lowercased() == userTitle.lowercased() {
+                        return true
+                    } else {
+                        return leftMovie.1 < rightMovie.1
+                    }
+                }
                 .map { $0.0 }
+            
+            
+            self.activeSearchMovies = movies
 
         }
         

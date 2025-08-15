@@ -74,7 +74,18 @@ struct NodeGraphView: View {
                     path.move(to: from)
                     path.addLine(to: to)
                 }
-                context.stroke(path, with: .color(self.lineColor), style: .init(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                
+                
+                let startColor = Self.colorFromText(self.graph.nodes[aIdx].directors.first?.name ?? "", saturation: 0.3, brightness: 0.3).opacity(0.35)
+                let endColor = Self.colorFromText(self.graph.nodes[bIdx].directors.first?.name ?? "", saturation: 0.3, brightness: 0.3).opacity(0.35)
+
+                let shading : GraphicsContext.Shading = .linearGradient(
+                    Gradient(colors: [consume startColor, consume endColor]),
+                    startPoint: from,
+                    endPoint: to
+                )
+                
+                context.stroke(path, with: shading, style: .init(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
             }
         }.blur(radius: 0.25)
     }
@@ -96,7 +107,7 @@ struct NodeGraphView: View {
                     ZStack {
                         Circle()
                             .stroke(Color.init(white: 0.2).opacity(0.7), lineWidth: 3)
-                            .fill(Color.init(white: 0.4).opacity(0.8))
+                            .fill(Self.colorFromText(node.directors.first?.name ?? "", saturation: 0.4, brightness: 0.5).opacity(0.8))
                             .frame(width: size, height: size)
                             .position(x: positionX, y: positionY)
                             .blur(radius: 1)
@@ -104,7 +115,7 @@ struct NodeGraphView: View {
                         Text(node.title)
                             .font(.custom("Comica", size: 16))
                             .foregroundStyle(Color.init(white: 0.1))
-                            .position(x: positionX, y: positionY)
+                            .position(x: positionX, y: positionY + 20)
                          
                     }
 
@@ -188,6 +199,20 @@ struct NodeGraphView: View {
                 self.nodes
             }
         }.drawingGroup(opaque: true)
+    }
+    
+    private static func colorFromText(_ text: String, saturation : Double = 0.6, brightness : Double = 0.8) -> Color {
+        // Step 1: Hash the string into a UInt32
+        var hash = UInt32(5381)
+        for char in text.utf8 {
+            hash = ((hash << 5) &+ hash) &+ UInt32(char)
+        }
+        
+        // Step 2: Map hash to a hue (0–1)
+        let hue = Double(hash % 360) / 360.0
+        
+        // Step 3: Create color with fixed saturation & brightness
+        return Color(hue: hue, saturation: saturation, brightness: brightness)
     }
 }
 
