@@ -1,26 +1,79 @@
+//
+//  Graph.swift
+//  MetalTest
+//
+//  Created by Owen O'Malley on 8/17/25.
+//
+
 import MetalPerformanceShadersGraph
 
-struct GraphSimulatorParams {
+struct GraphParams {
     let edgeRepulsion : Double = 10.0
-    let edgeAttraction : Double = 0.01
-    let damping : Double = 0.9
+    let edgeAttraction : Double = 0.001
+    let damping : Double = 0.4
 }
 
-struct GraphSimulator {
+@Observable final class Graph {
 
-    let graphParams = GraphSimulatorParams()
+    let graphParams = GraphParams()
     let graph : MPSGraph = .init()
+    let metalDevice : MTLDevice
     let graphDevice : MPSGraphDevice
+    let numNodes : NSNumber
     
-    init() {
+    private var positionsTensorData : MPSGraphTensorData
+    private var velocitiesTensorData : MPSGraphTensorData
+    
+    private var outputPositions : MPSGraphTensor?
+    private var outputVelocities : MPSGraphTensor?
+    
+    private var positionsTensor : MPSGraphTensor?
+    private var velocitiesTensor : MPSGraphTensor?
+    
+    private var positionsBuffer : MTLBuffer
+    private var velocitiesBuffer : MTLBuffer
+    
+    public var x : [Float32] = []
+    public var y : [Float32] = []
+    
+    
+    init(x : [Float32], y : [Float32]) {
+        
+        assert(x.count == y.count)
+        
+        let numNodes = x.count
+        
+        self.x = x
+        self.y = y
+        
+        self.numNodes = NSNumber(integerLiteral: numNodes)
         let device = MTLCreateSystemDefaultDevice()!
+        self.metalDevice = device
         self.graphDevice = MPSGraphDevice(mtlDevice: device)
+
+        let positions = zip(x, y).map { SIMD2<Float32>($0.0, $0.1) }
+        
+        let positionsBuffer = self.metalDevice.makeBuffer(bytes: positions, length: MemoryLayout<simd_float2>.size * numNodes, options: .storageModeShared)!
+        let velocitiesBuffer = self.metalDevice.makeBuffer(length: MemoryLayout<simd_float2>.size * numNodes, options: .storageModeShared)!
+        
+        self.positionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [2, NSNumber(value: numNodes)], dataType: .float32)
+        self.velocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [2, NSNumber(value: numNodes)], dataType: .float32)
+        
+        self.positionsBuffer = positionsBuffer
+        self.velocitiesBuffer = velocitiesBuffer
+        
     }
     
-    func buildForceDirectedGraph(numNodes: NSNumber, nodePositions: MPSGraphTensor, debugPrint: Bool = true) -> MPSGraphTensor {
-                
-        let aNodePositions = self.graph.expandDims(nodePositions, axes: [2], name: "a_node_positions_expanded") // [2, N, 1]
-        let bNodePositions = self.graph.expandDims(nodePositions, axes: [1], name: "b_node_positions_expanded") // [2, 1, N]
+    func buildGraph(debugPrint: Bool = true) {
+        let inputNodeShape: [NSNumber] = [2, self.numNodes]
+
+        let positionsTensor = self.graph.placeholder(shape: inputNodeShape, dataType: .float32, name: "positions") //[2, N]
+        let velocityTensor = self.graph.placeholder(shape: inputNodeShape, dataType: .float32, name: "velocities") //[2, N]
+        
+        //the actual function
+        
+        let aNodePositions = self.graph.expandDims(positionsTensor, axes: [2], name: "a_node_positions_expanded") // [2, N, 1]
+        let bNodePositions = self.graph.expandDims(positionsTensor, axes: [1], name: "b_node_positions_expanded") // [2, 1, N]
         
         let aNodePositionsTiled = self.graph.tileTensor(aNodePositions, withMultiplier: [1, 1, numNodes], name: "a_node_positions_tiled") // [2, N, N]
         let bNodePositionsTiled = self.graph.tileTensor(bNodePositions, withMultiplier: [1, numNodes, 1], name: "b_node_positions_tiled") // [2, N, N]
@@ -32,7 +85,7 @@ struct GraphSimulator {
         let (aNodePositionsSparse, bNodePositionsSparse) = self.withSparseIndices(of: triangularIndices) { columnTensor, rowTensor in
             let indices = self.graph.stack([rowTensor, columnTensor], axis: 1, name: nil)
             
-            let buildSparseTensor : (borrowing MPSGraphTensor) -> MPSGraphTensor = { nodePositions in
+            let buildSparseTensor : (MPSGraphTensor) -> MPSGraphTensor = { [self] nodePositions in
                 let nodePositionsSparseAxisSplit : [MPSGraphTensor] = (0..<2).map { idx in
                     
                     let start = NSNumber(value: idx)
@@ -67,7 +120,7 @@ struct GraphSimulator {
             return (aNodePositionsSparse, bNodePositionsSparse)
         }
         
-        let deltas = self.graph.subtraction(bNodePositionsSparse, aNodePositionsSparse, name: "positions_delta") // [2, N, N]
+        let deltas = self.graph.subtraction(bNodePositionsTiled, aNodePositionsTiled, name: "positions_delta") // [2, N, N]
         let deltaSquared = self.graph.square(with: deltas, name: "positions_delta_squared") // [2, N, N]
         let distanceSquared = self.graph.reductionSum(with: deltaSquared, axis: 0, name: "distance_squared") // [1, N, N]
         let distances = self.graph.squareRoot(with: distanceSquared, name: "distances")// [1, N, N]
@@ -105,62 +158,84 @@ struct GraphSimulator {
 
         let perNodeAccelerationSqueezed = self.graph.squeeze(perNodeAcceleration, axis: 2, name: "per_node_acceleration_squeezed") // [2, N]
 
-        return perNodeAccelerationSqueezed
+        let updatedVelocities = self.graph.addition(velocityTensor, perNodeAccelerationSqueezed, name: "updated_velocities")// [2, N]
         
+        let damping = self.graph.constant(self.graphParams.damping, dataType: .float32)
+        let dampedVelocities = self.graph.multiplication(updatedVelocities, damping, name: "damped_velocities")// [2, N]
+        
+        let updatedPositions = self.graph.multiplication(positionsTensor, dampedVelocities, name: "updated_positions")// [2, N]
+        
+        let feeds : [MPSGraphTensor : MPSGraphShapedType] = [
+            positionsTensor : .init(shape: [2, numNodes], dataType: .float32),
+            velocityTensor : .init(shape: [2, numNodes], dataType: .float32)
+        ]
+        
+        
+        //self.graph.compile(with: self.graphDevice, feeds: feeds, targetTensors: [dampedVelocities], targetOperations: [], compilationDescriptor: MPSGraphCompilationDescriptor())
+        
+        self.outputVelocities = dampedVelocities
+        self.outputPositions = updatedPositions
+        
+        self.positionsTensor = positionsTensor
+        self.velocitiesTensor = velocityTensor
     }
-
-    func run(x: [Float32], y: [Float32]) {
-        let nodeCount = x.count
-        precondition(x.count == y.count)
-
-        // Create input array of shape [N, 2]
-        var positions = [Float32]()
-        for i in 0..<nodeCount {
-            positions.append(x[i])
-            positions.append(y[i])
-        }
-
-        // Shape and input tensor
-        let shape: [NSNumber] = [2, NSNumber(value: nodeCount)]
-        let inputTensor = self.graph.placeholder(shape: shape, dataType: .float32, name: "positions")
-
-        let outputTensor = self.buildForceDirectedGraph(numNodes: NSNumber(integerLiteral: nodeCount), nodePositions: inputTensor)
-
-        let tensorData = positions.withUnsafeMutableBufferPointer { bufferPointer -> MPSGraphTensorData in
-            //let dataPointer = UnsafeMutableRawPointer(bufferPointer.baseAddress!)
-            //let data = Data(bytesNoCopy: dataPointer, count: bufferPointer.count, deallocator: .free)
-            let data = Data(buffer: bufferPointer)
-            return MPSGraphTensorData(device: graphDevice, data: data, shape: shape, dataType: .float32)
-        }
-
-        // Run graph
+    
+    func run() {
         
-        guard let outputShape = outputTensor.shape else {
-            fatalError("output shape unknown")
+        guard let outputVelocities = self.outputVelocities, let velocitiesTensor = self.velocitiesTensor else {
+            fatalError("tenors not initalized")
         }
+        
+        guard let outputPositions = self.outputPositions, let positionsTensor = self.positionsTensor else {
+            fatalError("tenors not initalized")
+        }
+        
+        let inputFeeds : [MPSGraphTensor: MPSGraphTensorData] = [
+            positionsTensor : positionsTensorData,
+            velocitiesTensor : velocitiesTensorData
+        ]
         
         let results = self.graph.run(
-            feeds: [inputTensor: tensorData],
-            targetTensors: [outputTensor],
+            feeds: inputFeeds,
+            targetTensors: [outputVelocities, outputPositions],
             targetOperations: nil
         )
 
         // Extract result
-        guard let resultTensorData = results[outputTensor] else {
+        guard let resultPositions = results[outputPositions] else {
             fatalError("No result")
         }
+        
+        guard let resultVelocities = results[outputVelocities] else {
+            fatalError("No result")
+        }
+                
+        let outputShape = outputVelocities.shape!
 
         let outputLength = Self.getFlattenedSize(from: outputShape)
         var resultBuffer = [Float32](repeating: 69, count: outputLength)
         
         resultBuffer.withUnsafeMutableBytes { pointer in
-            resultTensorData.mpsndarray().readBytes(pointer.baseAddress!, strideBytes: nil)
+            guard let address = pointer.baseAddress else {
+                fatalError("base address nil")
+            }
+            resultPositions.mpsndarray().readBytes(address, strideBytes: nil)
         }
 
         // Reshape to [[x, y]]
         self.printBuffer(resultBuffer, shape: outputShape)
+        
+        self.x = Array(resultBuffer[0..<self.numNodes.intValue])
+        self.y = Array(resultBuffer[self.numNodes.intValue..<resultBuffer.count])
+
+        print("x", self.x)
+        print("y", self.y)
+        
+        self.velocitiesTensorData = resultVelocities
+        self.positionsTensorData = resultPositions
 
     }
+    
     
     func withSparseIndices<T>(of indices : consuming [(Int32, Int32)], completion : (_ : borrowing MPSGraphTensor, _ : borrowing MPSGraphTensor) -> T) -> T {
   
@@ -174,62 +249,45 @@ struct GraphSimulator {
         
     }
     
-    func printBuffer<N : Numeric>(_ data: [N], shape nsShape: borrowing [NSNumber]) {
-        
-        let shape = nsShape.map(\.intValue)
-        
-        let format : (N) -> String = { value in
-            switch value {
-            case let v as Float:
-                return String(format: "%7.3f", v)   // width 7, 3 decimals
-            case let v as Double:
-                return String(format: "%7.3f", v)
-            case let v as Int:
-                return String(format: "%7d", v)     // width 7 for integers
-            case let v as Int32:
-                return String(format: "%7d", v)
-            case let v as Int64:
-                return String(format: "%7ld", v)
-            default:
-                return "\(value)"
-            }
+    func formatValue<N: Numeric>(_ value: N) -> String {
+        switch value {
+        case let v as Float:  return String(format: "%7.3f", v)
+        case let v as Double: return String(format: "%7.3f", v)
+        case let v as Int:    return String(format: "%7d", v)
+        case let v as Int32:  return String(format: "%7d", v)
+        case let v as Int64:  return String(format: "%7ld", v)
+        default:              return "\(value)"
         }
-        
-        print("Shape: \(shape)", "Data: \(data.count)")
-        
-        guard (1...3).contains(shape.count) else {
-            fatalError("Output shape is too large: \(shape.count)")
-        }
-        
+    }
+
+    func recursivePrint<N: Numeric>(
+        _ data: [N],
+        shape: [Int],
+        offset: Int,
+        stride: Int
+    ) {
         if shape.count == 1 {
-            for i in 0..<shape[0] {
-                print(data[i])
+            let row = (0..<shape[0]).map { i in
+                self.formatValue(data[offset + i * stride])
             }
-        } else if shape.count == 2 {
-            for i in 0..<shape[0] {
-                var row: [String] = []
-                for j in 0..<shape[1] {
-                    let idx = i * shape[1] + j
-                    row.append(format(data[idx]))
-                }
-                print(row.joined(separator: "\t"))
-            }
-        } else if shape.count == 3 {
+            print(row.joined(separator: "\t"))
+        } else {
+            let subShape = Array(shape.dropFirst())
+            let innerStride = stride * subShape.reduce(1, *)
             for i in 0..<shape[0] {
                 print("Slice \(i):")
-                for j in 0..<shape[1] {
-                    var row: [String] = []
-                    for k in 0..<shape[2] {
-                        let idx = i * shape[1] * shape[2] + j * shape[2] + k
-                        row.append(format(data[idx]))
-                    }
-                    print(row.joined(separator: "\t"))
-                }
-                print("") // empty line between slices
+                self.recursivePrint(data, shape: subShape, offset: offset + i * innerStride, stride: stride)
+                print("")
             }
         }
     }
-    
+
+    func printBuffer<N: Numeric>(_ data: [N], shape nsShape: [NSNumber]) {
+        let shape = nsShape.map(\.intValue)
+        print("Shape: \(shape)", "Data: \(data.count)")
+        recursivePrint(data, shape: shape, offset: 0, stride: 1)
+    }
+
     func buildTensor<N : Numeric>(from data : borrowing [N], shape: borrowing [NSNumber]) -> MPSGraphTensor {
         let mpsType = Self.mpsDataType(for: N.self)
         print("Using MPS type \(Self.mpsTypeToString(from: mpsType)) from Swift type \(N.self)")
@@ -328,11 +386,3 @@ struct GraphSimulator {
         }
     }
 }
-
-let simulator = GraphSimulator()
-
-let x: [Float32] = [0.0, 4.0, 0.0, 4.0]
-let y: [Float32] = [0.0, 0.0, 4.0, 4.0]
-
-simulator.run(x: x, y: y)
-

@@ -2,17 +2,16 @@
 //  GraphOld.swift
 //  Knot a Film
 //
-//  Created by Owen O'Malley on 1/30/25.
+//  Created by Owen O'Malley on 8/17/25.
 //
 
-import Foundation
 import Observation
 import SwiftUICore
+import Foundation
 import SwiftData
 
-
 @Observable
-@MainActor public final class GraphManager {
+@MainActor public class GraphManager {
 
     public typealias SIMDType = SIMD64<Double>
 
@@ -46,7 +45,7 @@ import SwiftData
     public private(set) var simulationTask : Task<Void, Never>? = nil
     public private(set) var visualizeTask : Task<Void, Never>? = nil
     
-    public init(of watchedMovies : consuming [Movie]) {
+    public required init(of watchedMovies : consuming [Movie]) {
         
         self.batchCount = Int(ceil(Double(watchedMovies.count * 2) / Double(Self.batchSize)))
         
