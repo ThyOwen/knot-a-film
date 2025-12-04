@@ -196,7 +196,8 @@ public struct DataManager : ~Copyable {
             moviePeople.withDictionaryAccess { moviePeopleDictionary in
                 parsedRows.forEach { parsedRow in
                     group.addTask {
-                        if let movie = try? Movie(parsedCSVRow: parsedRow, moviePeople: moviePeopleDictionary) {
+                        let movie = try? Movie(parsedCSVRow: parsedRow, moviePeople: moviePeopleDictionary)
+                        if let movie {
                             numOfSuccessfullyParsedMovies += 1
                             return movie
                         } else {

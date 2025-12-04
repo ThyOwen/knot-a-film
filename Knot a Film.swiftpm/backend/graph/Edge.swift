@@ -14,7 +14,7 @@ public enum MovieEdgeError  : Error {
     case noSharedMoviePeople
 }
 
-public struct MovieEdge<N : FloatingPoint & SIMDScalar> : Identifiable {
+public struct MovieEdge : Identifiable {
     public let id = UUID()
     
     public let aNodePositionIndex : Int

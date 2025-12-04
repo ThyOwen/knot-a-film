@@ -10,8 +10,8 @@ import AppleProductTypes
 let package = Package(
     name: "Knot a Film",
     platforms: [
-        .iOS("18.0"),
-        .macCatalyst("18")
+        .iOS("26.0"),
+        .macCatalyst("26")
     ],
     products: [
         .iOSApplication(
@@ -34,7 +34,8 @@ let package = Package(
                 .portraitUpsideDown(.when(deviceFamilies: [.pad]))
             ],
             capabilities: [
-                .fileAccess(.userSelectedFiles, mode: .readWrite)
+                .fileAccess(.userSelectedFiles, mode: .readWrite),
+                .fileAccess(.downloadsFolder, mode: .readWrite)
             ],
             appCategory: .reference
         )
@@ -44,6 +45,7 @@ let package = Package(
             name: "AppModule",
             path: ".",
             resources: [
+                .process("Resources/metal"),
                 .process("Resources/visuals"),
                 .copy("Resources/mlmodels")
             ],

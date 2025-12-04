@@ -67,7 +67,7 @@ public final actor MovieDatabaseActor {
 
         let defaultStoreExists = (try? Bundle.main.url(forResource: "default", withExtension: "store")?.checkResourceIsReachable()) ?? false
         
-        if !databaseFileExists, !defaultStoreExists {
+        if !databaseFileExists && !defaultStoreExists {
             try await DataManager.createDatabase(with: modelContainer)
             return try await self.loadModel(overwrite: false)
         } else {

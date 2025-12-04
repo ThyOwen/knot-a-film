@@ -1,11 +1,23 @@
 import SwiftUI
+import CoreML
+
 
 @main struct TestApp : App {
-    
+    @State private var startDate = Date.now
     var body: some Scene {
         WindowGroup {
-            TestView()
-                .frame(width: 200, height: 200)
+            //MetalView()
+            NBodyView()
+            
         }
     }
 }
+
+/*
+@main struct TestApp {
+    static func main() {
+        var graph = GraphNew(numNodes: 4)
+        graph.buildGraphStandard()
+    }
+}
+*/

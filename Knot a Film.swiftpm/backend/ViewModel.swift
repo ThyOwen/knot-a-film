@@ -36,7 +36,7 @@ public enum ViewModelError : Error {
     public func setup() {
         Task(priority: .background) {
             do {
-                let databaseActor = try await MovieDatabaseActor.loadModel(overwrite: true)
+                let databaseActor = try await MovieDatabaseActor.loadModel(overwrite: false)
                 
                 let searchEngine = try await SearchEngine.create(with: databaseActor)
                 let recommendationEngine = try await RecomendationEngine.create(with: databaseActor)
@@ -60,40 +60,13 @@ public enum ViewModelError : Error {
     
     public func search(using likelyMisspelledUserTitle : String) {
         Task {
-            guard let searchEngine, let databaseActor else {
+            guard let searchEngine else {
                 print("recomendation engine is nil")
                 return
             }
             
             try await searchEngine.search(basedOn: likelyMisspelledUserTitle)
 
-        }
-        
-    }
-    
-    public func recommend(using prompt : String, numSteps : Int = 2) {
-        Task {
-            guard let searchEngine, let graph else {
-                print("recomendation engine is nil")
-                return
-            }
-            graph.simulationTask?.cancel()
-            do {
-
-                /*
-                 let movies = try await recommendationEngine.search(using: prompt) + graph.nodes
-                 
-                 let newGraph = GraphManager(of: movies)
-                 
-                 newGraph.startSimulation()
-                 
-                 await MainActor.run { [graph] in
-                    self.graph = consume graph
-                 }
-                 */
-            } catch {
-                print(error)
-            }
         }
         
     }

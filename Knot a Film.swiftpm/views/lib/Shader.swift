@@ -5,7 +5,7 @@
 //  Created by Owen O'Malley on 2/19/25.
 //
 
-import SwiftUICore
+import SwiftUI
 
 extension EnvironmentValues {
     private static let shaderFunction: ShaderFunction = ShaderFunction(library: .bundle(.main), name: "coloredNoise")

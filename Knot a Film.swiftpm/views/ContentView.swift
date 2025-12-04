@@ -25,13 +25,11 @@ struct ContentView: View {
     
     @ViewBuilder var graph : some View {
         if let graph = self.viewModel.graph {
-            GridView {
-                NodeGraphView()
-                    .colorEffect(self.shader(0.2))
-            }
+            NodeGraphView()
+            //.colorEffect(self.shader(0.2))
             .environment(graph)
             .padding(20)
-            .drawingGroup()
+            //.drawingGroup()
         }
     }
     
