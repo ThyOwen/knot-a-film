@@ -6,11 +6,9 @@
 //
 
 #include <metal_stdlib>
-using namespace metal;
 
-struct Node {
-    float2 position [[attribute(0)]];
-};
+#include "include/GraphMetalTypes.h"
+using namespace metal;
 
 struct VertexOut {
     float4 position [[position]];
@@ -24,11 +22,13 @@ struct ScreenTransform {
 
 
 //functions
-vertex VertexOut vertexMain(Node node [[stage_in]],
-                            constant ScreenTransform& transform [[buffer(1)]]) {
+vertex VertexOut vertexMain(device const Body *bodies [[ buffer(0)]],
+                            constant ScreenTransform& transform [[buffer(1)]],
+                            uint vid [[ vertex_id ]]) {
+    Body body = bodies[vid];
     VertexOut out;
     
-    float2 position = (node.position * transform.scale) + transform.offset;
+    float2 position = (body.position * transform.scale) + transform.offset;
     
     out.position = float4(position, 0.0, 1.0);
     out.pointSize = 13.0;   // 12x12 pixels per point
@@ -37,14 +37,14 @@ vertex VertexOut vertexMain(Node node [[stage_in]],
 
 fragment float4 fragmentMain(float2 pointCoord [[point_coord]]) {
     // Remap (0..1) -> (-1..1)
-  /*
+
     float2 centered = pointCoord * 2.0 - 1.0;
     float dist = length(centered);
 
     if (dist > 1.0) {
         discard_fragment(); // outside circle
     }
-*/
+
     return float4(1.0, 0.2, 0.2, 1.0); // red circle
 }
 

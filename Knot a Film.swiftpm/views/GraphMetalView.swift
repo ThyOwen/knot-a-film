@@ -20,7 +20,7 @@ struct MetalView : UIViewRepresentable {
         
         let mtkView = MTKView()
         mtkView.delegate = context.coordinator
-        mtkView.preferredFramesPerSecond = 120
+        mtkView.preferredFramesPerSecond = 10
         
         if let metalDevice = MTLCreateSystemDefaultDevice() {
             mtkView.device = metalDevice
@@ -28,7 +28,7 @@ struct MetalView : UIViewRepresentable {
         
         mtkView.framebufferOnly = false
         mtkView.drawableSize = mtkView.frame.size
-        mtkView.isPaused = false            // don’t pause after a single draw
+        mtkView.isPaused = false
         mtkView.enableSetNeedsDisplay = false
         mtkView.depthStencilPixelFormat = .invalid
 

@@ -43,6 +43,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AppModule",
+            dependencies: ["SharedWithMetal"],
             path: ".",
             resources: [
                 .process("Resources/metal"),
@@ -53,6 +54,11 @@ let package = Package(
                 .enableUpcomingFeature("BareSlashRegexLiterals"),
                 .swiftLanguageMode(.v5)
             ]
+        ),
+        .target(
+            name: "SharedWithMetal",
+            path: "Resources/metal",
+            publicHeadersPath: "include"
         )
     ],
     swiftLanguageVersions: [.version("6")]

@@ -31,7 +31,7 @@ struct Graph {
 
     init(graphParams : GraphParams, connections : [SIMD2<UInt32>]) {
         
-        let numNodes = NSNumber(integerLiteral: graphParams.numNodes)
+        let numNodes = NSNumber(value: graphParams.numNodes)
         let numConnections = NSNumber(integerLiteral: connections.count)
 
         self.positionsTensor = self.graph.placeholder(shape: [numNodes, 2], dataType: .float32, name: "positions") // [N, 2]
@@ -48,17 +48,15 @@ struct Graph {
     mutating func testRun(positionsBuffer : inout MTLBuffer,
                           velocitiesBuffer : inout MTLBuffer,
                           connectionsBuffer : inout MTLBuffer) {
-        
-        let type : MPSDataType = self.graphParams.useFloat16 ? .float16 : .float32
-        
+                
         guard let outputVelocities = self.outputVelocities,
               let outputPositions = self.outputPositions,
               let tensorOfInterest = self.tensorOfInterest else {
             fatalError("tenors not initalized")
         }
         
-        let positionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: type)
-        let velocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: type)
+        let positionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: .float32)
+        let velocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: .float32)
         let connectionsTensorData = MPSGraphTensorData(connectionsBuffer, shape: [numConnections, 2], dataType: .int32)
         
         let inputFeeds : [MPSGraphTensor: MPSGraphTensorData] = [
@@ -102,15 +100,14 @@ struct Graph {
                 let outputPositions = self.outputPositions else {
             fatalError("tenors not initalized")
         }
-        
-        let type : MPSDataType = self.graphParams.useFloat16 ? .float16 : .float32
 
-        let positionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: type)
-        let velocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: type)
+
+        let positionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: .float32)
+        let velocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: .float32)
         let connectionsTensorData = MPSGraphTensorData(connectionsBuffer, shape: [numConnections, 2], dataType: .int32)
         
-        let updatedPositionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: type)
-        let updatedVelocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: type)
+        let updatedPositionsTensorData = MPSGraphTensorData(positionsBuffer, shape: [numNodes, 2], dataType: .float32)
+        let updatedVelocitiesTensorData = MPSGraphTensorData(velocitiesBuffer, shape: [numNodes, 2], dataType: .float32)
         
         let commandBuffer = MPSCommandBuffer(from: commandQueue)
         
@@ -150,16 +147,14 @@ struct Graph {
     
     mutating func compile(on metalDevice : MTLDevice) {
         
-        let type : MPSDataType = self.graphParams.useFloat16 ? .float16 : .float32
-
         guard let outputVelocities = self.outputVelocities,
               let outputPositions = self.outputPositions else {
             fatalError("tenors not initalized")
         }
         
         let inputFeeds : [MPSGraphTensor : MPSGraphShapedType] = [
-            positionsTensor : .init(shape: [numNodes, 2], dataType: type),
-            velocitiesTensor : .init(shape: [numNodes, 2], dataType: type),
+            positionsTensor : .init(shape: [numNodes, 2], dataType: .float32),
+            velocitiesTensor : .init(shape: [numNodes, 2], dataType: .float32),
             connectionsTensor : .init(shape: [numConnections, 2], dataType: .int32)
         ]
         
@@ -188,10 +183,9 @@ struct Graph {
     // builders
     mutating func buildGraphStandard(sparse : Bool = false) {
 
-        let type : MPSDataType = self.graphParams.useFloat16 ? .float16 : .float32
 
-        let positionsTensor = self.graph.placeholder(shape: [self.numNodes, 2], dataType: type, name: "positions") // [N, 2]
-        let velocityTensor = self.graph.placeholder(shape: [self.numNodes, 2], dataType: type, name: "velocities") // [N, 2]
+        let positionsTensor = self.graph.placeholder(shape: [self.numNodes, 2], dataType: .float32, name: "positions") // [N, 2]
+        let velocityTensor = self.graph.placeholder(shape: [self.numNodes, 2], dataType: .float32, name: "velocities") // [N, 2]
         let connectionsTensor = self.graph.placeholder(shape: [self.numConnections, 2], dataType: .int32, name: "connections")
         
         self.positionsTensor = positionsTensor
@@ -257,7 +251,7 @@ struct Graph {
         
         let deltaSquared = self.graph.square(with: deltas, name: "positions_delta_squared") // [N, N, 2]
         let distanceSquared = self.graph.reductionSum(with: deltaSquared, axis: 2, name: "distance_squared") // [N, N, 1]
-        let epsilon = self.graph.constant(self.graphParams.epsilon, dataType: type) // [N]
+        let epsilon = self.graph.constant(self.graphParams.epsilon, dataType: .float32) // [N]
         let softenedDistanceSquared = self.graph.addition(distanceSquared, epsilon, name: "softer_distance_squared") // [N, N, 1]
         let distances = self.graph.squareRoot(with: softenedDistanceSquared, name: "distances") // [N, N, 1]
                 
@@ -319,227 +313,6 @@ struct Graph {
         self.outputPositions = updatedPositions
     }
 
-    mutating func buildGraphNew() {
-                
-        let zeroTensor = self.graph.constant(0.0, dataType: .float32)
-        let zeroTensorComplex = self.graph.complexConstant(realPart: 0.0, imaginaryPart: 0.0, dataType: .complexFloat32)
-        let epsilonTensor = self.graph.constant(self.graphParams.epsilon, dataType: .float32)
-                
-        //the actual function
-        func boundsCreateBoundsTensor<N: Numeric>(from bounds: [(N, N)], axis: Int) -> MPSGraphTensor {
-            self.withTupledAccess(to: bounds) { lowerBounds, upperBounds in // [T], [T]
-
-                let positionsAxis = self.graph.sliceTensor(positionsTensor,
-                                                   dimension: 1,
-                                                   start: axis,
-                                                   length: 1,
-                                                   name: nil) // [N, 1]
-                
-                let lowerExpanded = self.graph.expandDims(lowerBounds, axes: [0], name: nil) // [1, T]
-                let upperExpanded = self.graph.expandDims(upperBounds, axes: [0], name: nil) // [1, T]
-
-                // Compare only along the chosen axis
-                let geLower = self.graph.greaterThanOrEqualTo(positionsAxis, lowerExpanded, name: nil) // [N, T]
-                let ltUpper = self.graph.lessThan(positionsAxis, upperExpanded, name: nil)             // [N, T]
-
-                let inBounds = self.graph.logicalAND(geLower, ltUpper, name: nil) // [N, T]
-
-                return inBounds
-            }
-        }
-
-        let widthBoundsArray = Self.getTileBounds(for: self.graphParams.widthParams)
-        let heightBoundsArray = Self.getTileBounds(for: self.graphParams.heightParams)
-        print("width", widthBoundsArray)
-        print("height", heightBoundsArray)
-
-        let widthBounds = boundsCreateBoundsTensor(from: widthBoundsArray, axis: 0)  // [N, W]
-        let heightBounds = boundsCreateBoundsTensor(from: heightBoundsArray, axis: 1) // [N, H]
-
-        let widthBoundsExpanded = self.graph.expandDims(widthBounds, axes: [1, -1], name: "width_bounds_expanded")   // [N, 1, W, 1]
-        let heightBoundsExpanded = self.graph.expandDims(heightBounds, axes: [2, -1], name: "height_bounds_expanded") // [N, H, 1, 1]
-
-        let tileIndices = self.graph.logicalAND(widthBoundsExpanded, heightBoundsExpanded, name: "bounds_indices") // [N, H, W, 1]
-
-        //FFT tiled forces
-        
-        let nodeInTile = self.graph.reductionAnd(with: tileIndices, axes: [3], name: "node_in_tile") // [N, H, W, 1]
-        let nodeInTileInt = self.graph.cast(nodeInTile, to: .int32, name: "node_in_tile_int") // [N, H, W, 1]
-        
-        let nodesPerTile = self.graph.reductionSum(with: nodeInTileInt, axes: [0], name: "nodes_per_tile") // [1, H, W, 1]
-        
-        let nodesPerTileFloat = self.graph.cast(nodesPerTile, to: .float32, name: "node_in_tile_float") // [1, H, W, 1]
-
-        
-        let nodesPerTileComplex = self.graph.complexTensor(realTensor: nodesPerTileFloat, imaginaryTensor: zeroTensor, name: nil) // [1, H, W, 1]
-        
-        let fftIn = MPSGraphFFTDescriptor()
-        fftIn.inverse = false
-        fftIn.scalingMode = .unitary
-
-        let rhoK = self.graph.fastFourierTransform(nodesPerTileComplex, axes: [1, 2], descriptor: fftIn, name: "rho_k") // [1, H, W, 1]
-                
-        let numWidthTiles = NSNumber(integerLiteral: self.graphParams.widthParams.numTiles)
-        let numHeightTiles = NSNumber(integerLiteral: self.graphParams.heightParams.numTiles)
-        
-        //let halfWidth = numWidthTiles.int32Value / 2
-        //let halfHeight = numHeightTiles.int32Value / 2
-        
-        //let kWidthsIndices : [Int32] = (-halfWidth...halfWidth).map { $0 }
-        //let kHeightsIndices : [Int32] = (-halfHeight...halfHeight).map { $0 }
-        
-        func makeKIndices(numTiles: Int32) -> [Int32] {
-            var ks = [Int32]()
-            let N = Int(numTiles)
-            for i in 0..<N {
-                let k = i <= N/2 ? Int32(i) : Int32(i - N)
-                ks.append(k)
-            }
-            return ks
-        }
-
-        let kWidthsIndices : [Int32] = makeKIndices(numTiles: numWidthTiles.int32Value) // length = W
-        let kHeightsIndices : [Int32] = makeKIndices(numTiles: numHeightTiles.int32Value)
-
-        let kWidthsTensor = self.buildTensor(from: kWidthsIndices, shape: [1, 1, numWidthTiles, 1]) // [1, 1, W, 1]
-        let kHeightsTensor = self.buildTensor(from: kHeightsIndices, shape: [1, numHeightTiles, 1, 1]) // [1, H, 1, 1]
-        
-        let kWidthsSquared = self.graph.square(with: kWidthsTensor, name: "k_widths_squared")  // [1, 1, W, 1]
-        let kHeightsSquared = self.graph.square(with: kHeightsTensor, name: "k_heights_squared")  // [1, H, 1, 1]
-                
-        let kWidthsSquaredFloat = self.graph.cast(kWidthsSquared, to: .float32, name: "k_widths_squared_float") // [1, 1, W, 1]
-        let kHeightsSquaredFloat = self.graph.cast(kHeightsSquared, to: .float32, name: "k_heights_squared_float") // [1, H, 1, 1]
-        
-        let kSquared = self.graph.addition(kWidthsSquaredFloat, kHeightsSquaredFloat, name: "k_distances_squared") // [1, H, W, 1]
-
-        let kSquaredSafeFloat = self.graph.maximum(kSquared, epsilonTensor, name: "k_squared_safe") // [1, H, W, 1]
-        let kSquaredSafeComplex = self.graph.complexTensor(realTensor: kSquaredSafeFloat, imaginaryTensor: zeroTensor, name: "k_distances_squared_complex")  // [1, H, W, 1]
-        let poisson = self.graph.division(rhoK, kSquaredSafeComplex, name: "poisson") // safe division
-        let poissonIsNan = self.graph.isNaN(with: poisson, name: nil) // [1, H, W, 1]
-        
-        let poissonSafe = self.graph.select(predicate: poissonIsNan, trueTensor: zeroTensorComplex, falseTensor: poisson, name: "k_distances_squared_safe") // [1, H, W, 1]
-        
-        let gravityConstant = -4 * self.graphParams.edgeRepulsion * Double.pi
-        let gravityConstantTensor = self.graph.complexConstant(realPart: gravityConstant, imaginaryPart: 0.0, dataType: .complexFloat32)
-        
-        let poissonScaled = self.graph.multiplication(gravityConstantTensor, poissonSafe, name: "poisson_scaled") // [1, H, W, 1]
-        
-        let fftOut = MPSGraphFFTDescriptor()
-        fftOut.inverse = true
-        fftOut.scalingMode = .unitary
-        
-        let potentialTensorComplex = self.graph.fastFourierTransform(poissonScaled, axes: [1, 2], descriptor: consume fftOut, name: "potential_tensor") // [1, H, W, 1]
-        
-        let potentialTensor = self.graph.realPartOfTensor(tensor: potentialTensorComplex, name: "potential_tensor") // [1, H, W, 1]
-        
-        let potentialTensorPerNode = self.graph.select(predicate: nodeInTile, trueTensor: potentialTensor, falseTensor: zeroTensor, name: "gravity_per_node") // [N, H, W, 1]
-
-        let convolutionTensorX = self.buildTensor(from: [-0.5, 0.0, 0.5] as [Float32], shape: [1, 1, 3, 1]) // [1, 1, 3, 1]
-        let convolutionTensorY = self.graph.transposeTensor(convolutionTensorX, dimension: 2, withDimension: 3, name: nil) // [1, 1, 1, 3]
-        
-        let convDescriptor = MPSGraphConvolution2DOpDescriptor(strideInX: 1, strideInY: 1,
-                                                               dilationRateInX: 1,
-                                                               dilationRateInY: 1,
-                                                               groups: 1,
-                                                               paddingStyle: .TF_SAME,
-                                                               dataLayout: .NHWC,
-                                                               weightsLayout: .OIHW)! // [outChannels, inChannels, kernelH, kernelW]
-        
-        let forceX = self.graph.convolution2D(potentialTensorPerNode, weights: convolutionTensorX, descriptor: convDescriptor, name: "gravity_x")  // [N, H, W, 1]
-        let forceY = self.graph.convolution2D(potentialTensorPerNode, weights: convolutionTensorY, descriptor: convDescriptor, name: "gravity_y") // [N, H, W, 1]
-
-        let gravityPerNodeStacked = self.graph.stack([forceX, forceY], axis: 3, name: "gravity_per_node_stacked") // [N, H, W, 2, 1]
-
-        let gravityPerNodeUnsafe = self.graph.squeeze(gravityPerNodeStacked, axes: [-1], name: "gravity_per_node") // [N, H, W, 2]
-        
-        let gravityPerNodeIsNan = self.graph.isNaN(with: gravityPerNodeUnsafe, name: nil) // [1, H, W, 1]
-        
-        let gravityPerNode = self.graph.select(predicate: gravityPerNodeIsNan, trueTensor: zeroTensor, falseTensor: gravityPerNodeUnsafe, name: nil)
-
-        
-        
-        
-        
-        
-        //regular forces
-        let positionsExpanded = self.graph.expandDims(positionsTensor, axes: [1, 2], name: nil) // [N, 1, 1, 2]
-
-        let positionsTiled = self.graph.select(predicate: tileIndices, trueTensor: positionsExpanded, falseTensor: zeroTensor, name: nil) // [N, H, W, 2]
-        
-        let aNodePositions = self.graph.expandDims(positionsTiled, axis: 1, name: "a_node_positions_tiled") // [1, N, H, W, 2]
-        let bNodePositions = self.graph.expandDims(positionsTiled, axis: 0, name: "b_node_positions_tiled") // [N, 1, H, W, 2]
-
-        let deltas = self.graph.subtraction(bNodePositions, aNodePositions, name: "deltas") // [N, N, H, W, 2]
-        let deltaSquared = self.graph.square(with: deltas, name: "positions_delta_squared") // [N, N, H, W, 2]
-        let distanceSquared = self.graph.reductionSum(with: deltaSquared, axis: 1, name: "distance_squared") // [N, N, H, W, 1]
-        
-        let softenedDistanceSquared = self.graph.addition(distanceSquared, epsilonTensor, name: "softer_distance_squared") // [N, N, H, W, 1]
-        let distances = self.graph.squareRoot(with: softenedDistanceSquared, name: "distances") // [N, N, H, W, 1]
-                
-        let directions = self.graph.divisionNoNaN(deltas, distances, name: "directions") // [N, N, H, W, 1]
-        
-        
-        
-        
-        
-        
-        
-        //edges
-        let edgeRepulsionTensor = self.graph.constant(self.graphParams.edgeRepulsion, dataType: .float32)
-        let repulsionForce = self.graph.divisionNoNaN(edgeRepulsionTensor, distances, name: "repulsion_force") // [N, N, H, W, 1]
-                
-        let edgeAttractionTensor = self.withTupledAccess(to: self.connections.map { (Int32($0.x), Int32($0.y)) }) { columnTensor, rowTensor in
-            let edgeAttractionArray = Array(repeating: Float32(self.graphParams.edgeAttraction), count: numConnections.intValue)
-            
-            let edgeAttractionTensor = self.buildTensor(from: edgeAttractionArray, shape: [numConnections])
-            
-            let edgeAttractionSparse = self.graph.sparseTensor(sparseTensorWithType: .COO,
-                                                               tensors: [edgeAttractionTensor, rowTensor, columnTensor],
-                                                               shape: [numNodes, numNodes],
-                                                               dataType: .float32,
-                                                               name: nil) // [N, N]
-            
-            let edgeAttractionTensorExpanded = self.graph.expandDims(edgeAttractionSparse,
-                                                                     axes: [-3, -2, -1],
-                                                                     name: "attraction_expanded") // [N, N, 1, 1, 1]
-
-            return edgeAttractionTensorExpanded
-        } // [N, N, 1, 1, 1]
-        
-        let attractionForce = self.graph.divisionNoNaN(distances, edgeAttractionTensor, name: "attraction_force") // [N, N, H, W, 1]
-
-        let forces = self.graph.subtraction(repulsionForce, attractionForce, name: "force") // [N, N, H, W, 1]
-
-        let acceleration = self.graph.multiplication(forces, directions, name: "acceleration") // [N, N, H, W, 1]
-
-        let perNodeAcceleration = self.graph.reductionSum(with: acceleration, axes: [0], name: nil) // [1, N, H, W, 2]
-        let perNodeAccelerationSqueezed = self.graph.squeeze(perNodeAcceleration, axes: [0], name: nil) // [N, H, W, 2]
-
-        let perNodeTotalAcceleration = self.graph.addition(perNodeAccelerationSqueezed, gravityPerNode, name: "per_node_total_accleration") // [N, H, W, 2]
-        
-        let totalAcceleration = self.graph.reductionSum(with: perNodeTotalAcceleration, axes: [1, 2], name: nil) // [N, 1, 1, 2]
-        let finalAcceleration = self.graph.squeeze(totalAcceleration, axes: [1, 2], name: nil) // [N, 2]
-                
-        let updatedVelocities = self.graph.addition(self.velocitiesTensor, finalAcceleration, name: "updated_velocities") // [N, 2]
-        
-        let damping = self.graph.constant(self.graphParams.damping, dataType: .float32) // [1]
-        let dampedVelocities = self.graph.multiplication(updatedVelocities, damping, name: "damped_velocities") // [N, 2]
-        
-        let updatedPositions = self.graph.addition(positionsTensor, dampedVelocities, name: "updated_positions") // [N, 2]
-
-        
-        let isNanPositions = self.graph.isNaN(with: updatedPositions, name: nil)
-        let isNanVelocities = self.graph.isNaN(with: dampedVelocities, name: nil)
-        
-        let safePositions = self.graph.select(predicate: isNanPositions, trueTensor: positionsTensor, falseTensor: updatedPositions, name: nil )
-        let safeVelocities = self.graph.select(predicate: isNanVelocities, trueTensor: velocitiesTensor, falseTensor: dampedVelocities, name: nil)
- 
-        self.tensorOfInterest = potentialTensor
-        
-        self.outputVelocities = safeVelocities
-        self.outputPositions = safePositions
-    }
-    
     // utilities
     func withTupledAccess<T, N : Numeric>(to indices : consuming [(N, N)], completion : (_ : borrowing MPSGraphTensor, _ : borrowing MPSGraphTensor) -> T) -> T {
         let length = NSNumber(value: indices.count)
@@ -577,23 +350,6 @@ struct Graph {
         
     }
 
-    static func getTileBounds<N : FloatingPoint & Numeric>(for params : GraphParams.TileParams<N>) -> [(N, N)] {
-
-        var bounds : [(N, N)] = []
-        bounds.reserveCapacity(params.numTiles)
-        
-        let halfTiles = params.numTiles / 2
-        
-        for idx in 0..<params.numTiles {
-            let start = (N(idx - halfTiles) * params.tileSize)
-            let end = (N(idx - halfTiles + 1) * params.tileSize)
-            
-            bounds.append((start, end))
-        }
-        
-        return bounds
-    }
-    
     static func getTriangularIndices(length : Int32) -> [(Int32, Int32)] {
 
         let size = Self.getNumRelevantNodes(numNodes: length).intValue
@@ -644,3 +400,4 @@ struct Graph {
     }
     
 }
+
