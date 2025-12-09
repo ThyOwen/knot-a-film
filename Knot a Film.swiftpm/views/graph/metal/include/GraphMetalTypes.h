@@ -21,9 +21,9 @@
 #define GRID_SIZE 512
 #define MAX_N 4194304
 #define MAX_NODES 349525
-#define MAX_DEPTH 3
+#define MAX_DEPTH 9
 #define N_LEAF 262144
-#define COLLISION_TH 0.0001
+#define COLLISION_TH 0.0
 #define MIN_DIST 0.3
 #define MAX_DIST 0.8
 #define SUN_MASS 10.0

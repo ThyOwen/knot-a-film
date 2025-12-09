@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-public struct FontJSON : Codable{
+public struct FontJSON : Codable {
     let fileName : String
     let fileExtension : String
     let name : String

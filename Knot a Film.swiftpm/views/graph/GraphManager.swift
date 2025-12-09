@@ -36,7 +36,7 @@ import SwiftData
         print(connectionsIndices.count)
         self.nodes = consume watchedMovies
         self.edges = edges
-        self.renderer = GraphRenderer(connections: connectionsIndices)
+        self.renderer = .init(connections: connectionsIndices)
  
     }
     

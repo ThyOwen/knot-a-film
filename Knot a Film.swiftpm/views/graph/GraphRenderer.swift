@@ -48,7 +48,7 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
 
         let device = MTLCreateSystemDefaultDevice()!
         
-        let params = GraphParams(120)
+        let params = GraphParams(12000)
         self.params = params
         
         let bodies = Self.initRandomBodies(params: params)
@@ -57,7 +57,6 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
                                              length: MemoryLayout<Body>.size * Int(params.numBodies),
                                              options: .storageModeShared)!
 
-        
         let connections = device.makeBuffer(bytes: connections,
                                             length: MemoryLayout<SIMD2<UInt32>>.size * connections.count,
                                             options: .storageModeShared)!
@@ -78,8 +77,8 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
         let library = try! device.makeDefaultLibrary(bundle: .main)
         
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexMain")
-        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentMain")
+        pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexBody")
+        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentBody")
         pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
         
@@ -210,7 +209,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     private var constructTreePipeline : MTLComputePipelineState
     private var computeForcePipeline : MTLComputePipelineState
     
-    private var renderPipeline: MTLRenderPipelineState
+    private var nodeRenderPipeline: MTLRenderPipelineState
+    private var bodyRenderPipeline: MTLRenderPipelineState
     
     private var nodeBuffer : MTLBuffer
     private var bodyBuffer : MTLBuffer
@@ -224,11 +224,11 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
     public var screenTransform : ScreenTransform = .init(offset: .zero, zoom: .init(1.0, 1.0))
 
-    private let threadgroupSize = MTLSize(width: 512, height: 1, depth: 1)
+    private let threadgroupSize = MTLSize(width: 576, height: 1, depth: 1)
     
     public init(connections : [SIMD2<UInt32>]) {
 
-        var params = GraphParams(12)
+        var params = GraphParams(10000)
         // Total nodes = 1 + 4 + 16 + ... + 4^maxDepth = (4^(maxDepth+1) - 1) / 3
         params.numNodes = (Int32(pow(4.0, Double(params.maxDepth + 1))) - 1) / 3
         params.leafLimit = (Int32(pow(4.0, Double(params.maxDepth))) - 1) / 3
@@ -239,8 +239,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let bodies = GraphRendererDirectSum.initRandomBodies(params: params)
         
         let bodySize = MemoryLayout<Body>.stride * Int(params.numBodies)
-        self.bodyBuffer = device.makeBuffer(bytes: bodies, length: bodySize, options: .storageModeShared)!
-        self.bodyBufferAlt = device.makeBuffer(bytes: bodies, length: bodySize, options: .storageModeShared)!
+        self.bodyBuffer = device.makeBuffer(bytes: bodies, length: bodySize, options: .storageModeManaged)!
+        self.bodyBufferAlt = device.makeBuffer(length: bodySize, options: .storageModePrivate)!
         
         let nodeSize = MemoryLayout<Node>.stride * Int(params.numNodes)
         self.nodeBuffer = device.makeBuffer(length: nodeSize, options: .storageModePrivate)!
@@ -257,13 +257,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         //render
         let vertexDescriptor = GraphRendererDirectSum.makeBodyVertexDescriptor()
         
-        let pipelineDescriptor = MTLRenderPipelineDescriptor()
-        pipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexMain")
-        pipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentMain")
-        pipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        pipelineDescriptor.vertexDescriptor = vertexDescriptor
+        let bodyPipelineDescriptor = MTLRenderPipelineDescriptor()
+        bodyPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexBody")
+        bodyPipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentBody")
+        bodyPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         
-        self.renderPipeline = try! device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        let nodePipelineDescriptor = MTLRenderPipelineDescriptor()
+        nodePipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexNode")
+        nodePipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentNode")
+        nodePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        
+        self.nodeRenderPipeline = try! device.makeRenderPipelineState(descriptor: nodePipelineDescriptor)
+        self.bodyRenderPipeline = try! device.makeRenderPipelineState(descriptor: bodyPipelineDescriptor)
 
         //compute
         let resetFunction = library.makeFunction(name: "resetKernel")!
@@ -331,21 +336,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         var currentBuffer = bodyBuffer
         var nextBuffer = bodyBufferAlt
         
-        for level in 0..<self.params.maxDepth {
+        for level in 0...self.params.maxDepth {
             let nodesInLevel = Int(pow(4.0, Double(level)))
-            let nodeOffset = (Int(pow(4.0, Double(level))) - 1) / 3
-            
-            var nodeOffsetVar = Int32(nodeOffset)
-            
+            var nodeOffset = (Int32(pow(4.0, Double(level))) - 1) / 3
+                        
             encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
             encoder.setBuffer(currentBuffer, offset: 0, index: 1)
             encoder.setBuffer(nextBuffer, offset: 0, index: 2)
-            encoder.setBytes(&nodeOffsetVar, length: MemoryLayout<Int32>.stride, index: 3)
+            encoder.setBytes(&nodeOffset, length: MemoryLayout<Int32>.stride, index: 3)
             encoder.setBytes(&params.numNodes, length: MemoryLayout<Int32>.stride, index: 4)
             encoder.setBytes(&params.numBodies, length: MemoryLayout<Int32>.stride, index: 5)
             encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 6)
             
-            // Allocate threadgroup memory
             let countMemSize = MemoryLayout<Int32>.stride * 8
             let massMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
             let centerMemSize = MemoryLayout<SIMD2<Float>>.stride * threadgroupSize.width
@@ -356,14 +358,12 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
             let gridSize = MTLSize(width: nodesInLevel, height: 1, depth: 1)
             encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
             
-            // Swap buffers for next level
             swap(&currentBuffer, &nextBuffer)
         }
         
         encoder.endEncoding()
         
-        if self.params.maxDepth % 2 == 1 {
-            // If we did an odd number of swaps, the final data is in bodyBufferAlt
+        if self.params.maxDepth % 2 == 1 {// If we did an odd number of swaps, the final data is in bodyBufferAlt
             swap(&bodyBuffer, &bodyBufferAlt)
         }
     }
@@ -406,25 +406,61 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.computeForces(commandBuffer: commandBuffer)
         
         //computeEncoder.endEncoding()
-        let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)!
         
         memcpy(self.transformBuffer.contents(), &self.screenTransform, MemoryLayout<ScreenTransform>.stride)
 
-        renderEncoder.setRenderPipelineState(self.renderPipeline)
+        let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)!
+    
+        // draw bounding box nodes
+        renderEncoder.setRenderPipelineState(self.nodeRenderPipeline)
+        renderEncoder.setVertexBuffer(self.nodeBuffer, offset: 0, index: 0)
+        renderEncoder.setVertexBuffer(self.transformBuffer, offset: 0, index: 1)
+        renderEncoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: Int(self.params.numNodes) * 8)
+        
+        // draw bodies 
+        renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
         renderEncoder.setVertexBuffer(self.bodyBuffer, offset: 0, index: 0)
         renderEncoder.setVertexBuffer(self.transformBuffer, offset: 0, index: 1)
         renderEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: Int(self.params.numBodies))
-        
+    
         renderEncoder.endEncoding()
         commandBuffer.present(drawable)
-        commandBuffer.commit()
-    
-        commandBuffer.waitUntilCompleted()
         
-        let ptrBody = bodyBuffer.contents().bindMemory(to: Body.self, capacity: Int(self.params.numBodies))
-        print("=== Frame Update (\(self.params.numBodies) bodies) ===")
-        for i in 0..<Int(self.params.numBodies) {
-            print("Body \(i):", ptrBody[i])
+        commandBuffer.commit()
+        
+        /*
+        commandBuffer.waitUntilCompleted()
+
+         
+        let ptrNode = nodeBuffer.contents().bindMemory(to: Node.self, capacity: Int(self.params.numNodes))
+
+        var leafCount = 0, internalCount = 0, emptyCount = 0
+        
+        print("\n=== TREE STRUCTURE DEBUG ===")
+        for i in 0..<Int(self.params.numNodes) {
+            let node = ptrNode[i]
+            let isEmpty = node.start == UInt32.max  // -1 stored as unsigned
+            let statusStr = isEmpty ? "EMPTY" : (node.isLeaf ? "LEAF" : "INTERNAL")
+            print("Node[\(i)]: \(statusStr), start=\(node.start), end=\(node.end), mass=\(node.totalMass), COM=(\(node.centerOfMass.x), \(node.centerOfMass.y))")
+            print("         bounds: topLeft=(\(node.topLeft.x), \(node.topLeft.y)), bottomRight=(\(node.bottomRight.x), \(node.bottomRight.y))")
+            
+            if isEmpty {
+                emptyCount += 1
+            } else if node.isLeaf {
+                leafCount += 1
+            } else {
+                internalCount += 1
+            }
         }
+        
+        for i in 21..<Int(self.params.numNodes) {
+            let node = ptrNode[i]
+            if node.start == UInt32.max { emptyCount += 1 }
+            else if node.isLeaf { leafCount += 1 }
+            else { internalCount += 1 }
+        }
+        
+        print("TOTAL: \(leafCount) leaves, \(internalCount) internal, \(emptyCount) empty")
+        */
     }
 }

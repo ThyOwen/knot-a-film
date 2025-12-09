@@ -46,7 +46,7 @@ let package = Package(
             dependencies: ["SharedWithMetal"],
             path: ".",
             resources: [
-                .process("Resources/metal"),
+                .process("views/graph/metal"),
                 .process("Resources/visuals"),
                 .copy("Resources/mlmodels")
             ],
@@ -57,7 +57,7 @@ let package = Package(
         ),
         .target(
             name: "SharedWithMetal",
-            path: "Resources/metal",
+            path: "views/graph/metal",
             publicHeadersPath: "include"
         )
     ],
