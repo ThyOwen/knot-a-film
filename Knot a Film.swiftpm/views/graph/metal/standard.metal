@@ -16,6 +16,11 @@ inline float getDistance(float2 a, float2 b) {
     return sqrt(d.x*d.x + d.y*d.y);
 }
 
+inline float getDistance(half2 a, half2 b) {
+    half2 d = a - b;
+    return sqrt(d.x*d.x + d.y*d.y);
+}
+
 inline bool isCollide(thread const Body &b1,
                       thread const Body &b2,
                       float collisionThreshold) {

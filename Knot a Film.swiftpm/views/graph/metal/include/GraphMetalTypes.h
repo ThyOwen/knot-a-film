@@ -6,7 +6,7 @@
 #endif
 
 // Constants
-#define NUM_BODIES 300
+#define NUM_BODIES 1024
 #define WINDOW_WIDTH 2048
 #define WINDOW_HEIGHT 2048
 #define NBODY_WIDTH 2.0
@@ -32,11 +32,11 @@
 #define EARTH_DIA 0.01
 #define HBL 1.6e29
 
-
 struct Node {
-    simd_float2 topLeft;
-    simd_float2 bottomRight;
-    simd_float2 centerOfMass;
+    simd_half2 topLeft;
+    simd_half2 bottomRight;
+    simd_half2 centerOfMass;
+    
     float totalMass;
     uint start;
     uint end;
@@ -47,7 +47,19 @@ struct Body {
     bool isDynamic;
     float mass;
     float radius;
-    simd_float2 position;
-    simd_float2 velocity;
-    simd_float2 acceleration;
+    simd_half2 position;
+    simd_half2 velocity;
+    simd_half2 acceleration;
 };
+
+
+struct NodeData {
+    struct Node nodes[MAX_NODES];
+    int numNodes;
+};
+
+struct BodyData {
+    struct Body bodies[NUM_BODIES];
+    int numBodies;
+};
+

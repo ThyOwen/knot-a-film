@@ -15,14 +15,10 @@ public struct GraphParams {
     let damping : Double = 0.001
     let epsilon : Double = 1e-03
     
-    var numBodies : Int32
+    var numBodies : Int32 = NUM_BODIES
     var numNodes : Int32 = MAX_NODES
     var leafLimit : Int32 = MAX_NODES - N_LEAF
     let maxDepth: Int32 = MAX_DEPTH
-        
-    init(_ numBodies : Int32) {
-        self.numBodies = numBodies
-    }
 }
 
 
@@ -48,7 +44,7 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
 
         let device = MTLCreateSystemDefaultDevice()!
         
-        let params = GraphParams(12000)
+        let params = GraphParams()
         self.params = params
         
         let bodies = Self.initRandomBodies(params: params)
@@ -155,29 +151,29 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
     }
 
     static public func initRandomBodies(params : borrowing GraphParams) -> [Body] {
-        let maxDistance: Float = Float(MAX_DIST)
-        let minDistance: Float = Float(MIN_DIST)
+        let maxDistance = Float16(MAX_DIST)
+        let minDistance = Float16(MIN_DIST)
         let numBodies = Int(params.numBodies)
         
-        let centerPos = SIMD2<Float32>(x: Float32(CENTERX), y: Float32(CENTERY))
+        let centerPos = SIMD2<Float16>(x: Float16(CENTERX), y: Float16(CENTERY))
 
         var bodies : [Body] = .init(repeating: Body(), count: numBodies)
         
         for i in 0..<(numBodies - 1) {
             let angle : Float32 = 2.0 * Float32.pi * Float32.random(in: 0...1)
-            let radius : Float32 = (maxDistance - minDistance) * Float32.random(in: 0...1) + minDistance
+            let radius : Float16 = (maxDistance - minDistance) * Float16.random(in: 0...1) + minDistance
 
-            let x = centerPos.x + radius * cos(angle)
-            let y = centerPos.y + radius * sin(angle)
-            let position = SIMD2<Float32>(x: x, y: y)
+            let x = centerPos.x + radius * Float16(cos(angle))
+            let y = centerPos.y + radius * Float16(sin(angle))
+            let position = SIMD2<Float16>(x: x, y: y)
             
             let body : Body = .init(
                 isDynamic: true,
                 mass: 1,//Float(EARTH_MASS),
                 radius: 1,//Float(EARTH_DIA),
                 position: position,
-                velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
-                acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
+                velocity: SIMD2<Float16>(x: 0.0, y: 0.0),
+                acceleration: SIMD2<Float16>(x: 0.0, y: 0.0)
             )
             bodies[i] = body
         }
@@ -187,8 +183,8 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
             mass: Float(SUN_MASS),
             radius: Float(SUN_DIA),
             position: centerPos,
-            velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
-            acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
+            velocity: SIMD2<Float16>(x: 0.0, y: 0.0),
+            acceleration: SIMD2<Float16>(x: 0.0, y: 0.0)
         )
         
         bodies[numBodies - 1] = body
@@ -228,7 +224,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     public init(connections : [SIMD2<UInt32>]) {
 
-        var params = GraphParams(10000)
+        var params = GraphParams()
         // Total nodes = 1 + 4 + 16 + ... + 4^maxDepth = (4^(maxDepth+1) - 1) / 3
         params.numNodes = (Int32(pow(4.0, Double(params.maxDepth + 1))) - 1) / 3
         params.leafLimit = (Int32(pow(4.0, Double(params.maxDepth))) - 1) / 3
@@ -238,15 +234,34 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         let bodies = GraphRendererDirectSum.initRandomBodies(params: params)
         
-        let bodySize = MemoryLayout<Body>.stride * Int(params.numBodies)
-        self.bodyBuffer = device.makeBuffer(bytes: bodies, length: bodySize, options: .storageModeManaged)!
-        self.bodyBufferAlt = device.makeBuffer(length: bodySize, options: .storageModePrivate)!
+        let bodySize = MemoryLayout<BodyData>.stride
+        self.bodyBuffer = device.makeBuffer(length: bodySize, options: .storageModeShared)!
+        self.bodyBufferAlt = device.makeBuffer(length: bodySize, options: .storageModeShared)!
         
-        let nodeSize = MemoryLayout<Node>.stride * Int(params.numNodes)
-        self.nodeBuffer = device.makeBuffer(length: nodeSize, options: .storageModePrivate)!
+        let bodyDataPtr = bodyBuffer.contents().bindMemory(to: BodyData.self, capacity: 1)
+        withUnsafeMutablePointer(to: &bodyDataPtr.pointee.bodies.0) { bodiesPtr in
+            for (i, body) in bodies.enumerated() where i < Int(NUM_BODIES) {
+                bodiesPtr.advanced(by: i).pointee = body
+            }
+        }
+        bodyDataPtr.pointee.numBodies = params.numBodies
+        
+        let bodyDataAltPtr = bodyBufferAlt.contents().bindMemory(to: BodyData.self, capacity: 1)
+        withUnsafeMutablePointer(to: &bodyDataAltPtr.pointee.bodies.0) { bodiesPtr in
+            for (i, body) in bodies.enumerated() where i < Int(NUM_BODIES) {
+                bodiesPtr.advanced(by: i).pointee = body
+            }
+        }
+        bodyDataAltPtr.pointee.numBodies = params.numBodies
+        
+        // Create NodeData buffer and initialize
+        let nodeSize = MemoryLayout<NodeData>.stride
+        self.nodeBuffer = device.makeBuffer(length: nodeSize, options: .storageModeShared)!
+        let nodeDataPtr = nodeBuffer.contents().bindMemory(to: NodeData.self, capacity: 1)
+        nodeDataPtr.pointee.numNodes = params.numNodes
 
         let mutexSize = MemoryLayout<Int32>.stride * Int(params.numNodes)
-        self.mutexBuffer = device.makeBuffer(length: mutexSize, options: .storageModePrivate)!
+        self.mutexBuffer = device.makeBuffer(length: mutexSize, options: .storageModeShared)!
         
         let transformSize = MemoryLayout<ScreenTransform>.size
         self.transformBuffer = device.makeBuffer(length: transformSize,
@@ -285,7 +300,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         self.commandQueue = device.makeCommandQueue()!
 
-        self.connectionsBuffer = device.makeBuffer(length: bodySize, options: .storageModePrivate)!
+        self.connectionsBuffer = device.makeBuffer(length: bodySize, options: .storageModeShared)!
         self.device = device
         super.init()
     }
@@ -296,9 +311,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setComputePipelineState(resetPipeline)
         encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
         encoder.setBuffer(mutexBuffer, offset: 0, index: 1)
-        
-        encoder.setBytes(&params.numNodes, length: MemoryLayout<Int32>.stride, index: 2)
-        encoder.setBytes(&params.numBodies, length: MemoryLayout<Int32>.stride, index: 3)
+        encoder.setBuffer(bodyBuffer, offset: 0, index: 2)
         
         let gridSize = MTLSize(width: (Int(params.numNodes) + threadgroupSize.width - 1) / threadgroupSize.width,
                               height: 1, depth: 1)
@@ -313,8 +326,6 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
         encoder.setBuffer(bodyBuffer, offset: 0, index: 1)
         encoder.setBuffer(mutexBuffer, offset: 0, index: 2)
-        
-        encoder.setBytes(&self.params.numBodies, length: MemoryLayout<Int32>.stride, index: 3)
         
         let threadgroupMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
         encoder.setThreadgroupMemoryLength(threadgroupMemSize, index: 0) // topLeftX
@@ -336,18 +347,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         var currentBuffer = bodyBuffer
         var nextBuffer = bodyBufferAlt
         
+        encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
+        encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 4)
+        
         for level in 0...self.params.maxDepth {
             let nodesInLevel = Int(pow(4.0, Double(level)))
             var nodeOffset = (Int32(pow(4.0, Double(level))) - 1) / 3
                         
-            encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
             encoder.setBuffer(currentBuffer, offset: 0, index: 1)
             encoder.setBuffer(nextBuffer, offset: 0, index: 2)
             encoder.setBytes(&nodeOffset, length: MemoryLayout<Int32>.stride, index: 3)
-            encoder.setBytes(&params.numNodes, length: MemoryLayout<Int32>.stride, index: 4)
-            encoder.setBytes(&params.numBodies, length: MemoryLayout<Int32>.stride, index: 5)
-            encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 6)
-            
+
+
             let countMemSize = MemoryLayout<Int32>.stride * 8
             let massMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
             let centerMemSize = MemoryLayout<SIMD2<Float>>.stride * threadgroupSize.width
@@ -363,7 +374,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         encoder.endEncoding()
         
-        if self.params.maxDepth % 2 == 1 {// If we did an odd number of swaps, the final data is in bodyBufferAlt
+        if self.params.maxDepth % 2 == 1 {
             swap(&bodyBuffer, &bodyBufferAlt)
         }
     }
@@ -374,10 +385,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setComputePipelineState(computeForcePipeline)
         encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
         encoder.setBuffer(bodyBuffer, offset: 0, index: 1)
-        
-        encoder.setBytes(&params.numNodes, length: MemoryLayout<Int32>.stride, index: 2)
-        encoder.setBytes(&params.numBodies, length: MemoryLayout<Int32>.stride, index: 3)
-        encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 4)
+        encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 2)
         
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                               height: 1, depth: 1)
@@ -411,16 +419,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
         let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)!
     
+        renderEncoder.setVertexBuffer(self.transformBuffer, offset: 0, index: 1)
+        
         // draw bounding box nodes
         renderEncoder.setRenderPipelineState(self.nodeRenderPipeline)
+        let nodeArrayOffset = MemoryLayout<Int32>.stride
         renderEncoder.setVertexBuffer(self.nodeBuffer, offset: 0, index: 0)
-        renderEncoder.setVertexBuffer(self.transformBuffer, offset: 0, index: 1)
         renderEncoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: Int(self.params.numNodes) * 8)
         
         // draw bodies 
         renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
+        let bodyArrayOffset = MemoryLayout<Int32>.stride
         renderEncoder.setVertexBuffer(self.bodyBuffer, offset: 0, index: 0)
-        renderEncoder.setVertexBuffer(self.transformBuffer, offset: 0, index: 1)
         renderEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: Int(self.params.numBodies))
     
         renderEncoder.endEncoding()

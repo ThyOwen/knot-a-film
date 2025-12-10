@@ -22,7 +22,7 @@ import SwiftData
     public var userZoom : CGFloat = 1
     public var userZoomCenter : UnitPoint = .zero
     
-    public let graphParams : GraphParams = .init(10)
+    public let graphParams : GraphParams = .init()
     
     public let isCircularized : Bool = false
     

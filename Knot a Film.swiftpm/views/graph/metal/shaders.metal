@@ -20,7 +20,7 @@ struct ScreenTransform {
     float2 scale;
 };
 
-vertex VertexOut vertexNode(device const Node *nodes [[ buffer(0)]],
+vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
                             constant ScreenTransform& transform [[ buffer(1) ]],
                             uint vertexId [[ vertex_id ]]) {
     //Node node = nodes[vid];
@@ -30,36 +30,36 @@ vertex VertexOut vertexNode(device const Node *nodes [[ buffer(0)]],
     uint nodeIndex = vertexId / 8;
     uint corner    = vertexId % 8;
 
-    Node node = nodes[nodeIndex];
+    Node node = nodeData.nodes[nodeIndex];
 
-    float2 topLeft = node.topLeft;
-    float2 bottomRight = node.bottomRight;
+    half2 topLeft = node.topLeft;
+    half2 bottomRight = node.bottomRight;
 
-    float2 topRight = float2(node.bottomRight.x, node.topLeft.y);
-    float2 bottomLeft = float2(node.topLeft.x, node.bottomRight.y);
+    half2 topRight = half2(node.bottomRight.x, node.topLeft.y);
+    half2 bottomLeft = half2(node.topLeft.x, node.bottomRight.y);
 
     // The 2 triangles that make a box
-    float2 corners[8] = {
+    half2 corners[8] = {
         topLeft, topRight,
         topRight, bottomRight,
         bottomRight, bottomLeft,
         bottomLeft, topLeft
     };
 
-    float2 pos = (corners[corner] * transform.scale) + transform.offset;
+    float2 pos = (float2(corners[corner]) * transform.scale) + transform.offset;
     //float2 pos = (node.centerOfMass * transform.scale) + transform.offset;
     out.position = float4(pos, 0.0, 1.0);
 
     return out;
 }
 
-vertex VertexOut vertexBody(device const Body *bodies [[ buffer(0)]],
+vertex VertexOut vertexBody(device const BodyData& bodyData [[ buffer(0)]],
                             constant ScreenTransform& transform [[buffer(1)]],
                             uint vertexId [[ vertex_id ]]) {
-    Body body = bodies[vertexId];
+    Body body = bodyData.bodies[vertexId];
     VertexOut out;
     
-    float2 position = (body.position * transform.scale) + transform.offset;
+    float2 position = (float2(body.position) * transform.scale) + transform.offset;
     
     out.position = float4(position, 0.0, 1.0);
     out.pointSize = 2.0;   // 12x12 pixels per point
