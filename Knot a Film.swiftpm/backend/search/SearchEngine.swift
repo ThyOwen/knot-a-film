@@ -12,17 +12,17 @@ import SwiftData
 
 import Accelerate
 
-
 //this class is responsible for both the recommendation and searching of the movie dataset
-@Observable public final class SearchEngine {
-    
+@Observable public final class SearchEngine: Equatable {
+
     private let nlTitleEmbedding : NLEmbedding
     private let titleEmbedding : DescriptionEmbeddings
 
-    private let databaseActor : MovieDatabaseActor
+    public let databaseActor : MovieDatabaseActor
     
-    public private(set) var activeSearchMovies : [Movie] = []
-    
+    public var activeSearchMovieIds: [String] = []
+    @MainActor public var activeSearchMovies: [MovieDTO] = []
+
     public init(nlTitleEmbedding: NLEmbedding,
                 titleEmbedding: DescriptionEmbeddings,
                 databaseActor : MovieDatabaseActor) {
@@ -30,6 +30,19 @@ import Accelerate
         self.titleEmbedding = titleEmbedding
         
         self.databaseActor = databaseActor
+    }
+    
+    @MainActor public func fetchActiveSearchMovies() async throws -> [MovieDTO] {
+        guard !activeSearchMovieIds.isEmpty else { return [] }
+                
+        let ids = activeSearchMovieIds
+        let fetchDescriptor = FetchDescriptor<Movie>(
+            predicate: #Predicate<Movie> { movie in
+                ids.contains(movie.rottenId)
+            }
+        )
+        
+        return try await databaseActor.fetchMovieDTOsSorted(fetchDescriptor, sortedBy: ids)
     }
     
     public static func create(with databaseActor : MovieDatabaseActor) async throws -> Self {
@@ -55,8 +68,7 @@ import Accelerate
                          databaseActor: databaseActor)
     }
     
-
-    public func search(basedOn userTitle : consuming String, limit : Int = 20) async throws {
+    @MainActor public func search(basedOn userTitle : consuming String, limit : Int = 20) async throws {
         guard let sentenceEmbedding = NLEmbedding.sentenceEmbedding(for: .english) else {
             throw ViewModelError.failedToCalculateSentenceVector
         }
@@ -77,24 +89,23 @@ import Accelerate
                 .init(\Movie.title)
             ]
         )
-        
-        try await self.databaseActor.withFetchResult(searchMovieDescription) { movies in
-            
-            let movies = zip(movies, neighbors)
-                .map { ($0, $1.1) }
-                .sorted { leftMovie, rightMovie in
-                    if leftMovie.0.title.lowercased() == userTitle.lowercased() {
-                        return true
-                    } else {
-                        return leftMovie.1 < rightMovie.1
-                    }
-                }
-                .map { $0.0 }
-            
-            
-            self.activeSearchMovies = movies
 
+        self.activeSearchMovieIds = try await self.databaseActor.fetchMovieIDsSortedByDistance(
+            searchMovieDescription, 
+            distances: neighbors.map { ($0.0, $0.1) },
+            priorityTitle: userTitle
+        )
+        
+        let movies = try await self.fetchActiveSearchMovies()
+        
+        await MainActor.run {
+            self.activeSearchMovies = movies
         }
         
     }
+    
+    public static func == (lhs: SearchEngine, rhs: SearchEngine) -> Bool {
+        lhs.activeSearchMovieIds == rhs.activeSearchMovieIds
+    }
+    
 }

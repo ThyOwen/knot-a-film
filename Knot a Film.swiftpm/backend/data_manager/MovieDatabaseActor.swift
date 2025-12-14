@@ -21,19 +21,70 @@ public final actor MovieDatabaseActor {
         try closure(self.modelContext)
     }
     
-    public func withFetchResult<N, T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: @Sendable (consuming [T]) async throws -> N) async throws -> N {
+    public func fetchMovieDTOs(_ fetchDescription: consuming FetchDescriptor<Movie>) async throws -> [MovieDTO] {
         let results = try self.modelContext.fetch(fetchDescription)
-        return try await closure(results)
+        return results.map { MovieDTO(from: $0) }
     }
     
-    public func withFetchResult<T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (consuming [T]) async throws -> Void) async throws {
+    public func fetchMovieDTOsSorted(_ fetchDescription: consuming FetchDescriptor<Movie>, sortedBy ids: [String]) async throws -> [MovieDTO] {
         let results = try self.modelContext.fetch(fetchDescription)
-        try await closure(results)
+        let idToIndex = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        return results
+            .sorted { (idToIndex[$0.rottenId] ?? Int.max) < (idToIndex[$1.rottenId] ?? Int.max) }
+            .map { MovieDTO(from: $0) }
     }
     
-    public func withMutableFetchResult<T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (inout [T]) async throws -> Void) async throws {
+    public func fetchMovieIDsSortedByDistance(_ fetchDescription: consuming FetchDescriptor<Movie>, distances: [(String, Double)], priorityTitle: String) async throws -> [String] {
+        let results = try self.modelContext.fetch(fetchDescription)
+        let distanceMap = Dictionary(uniqueKeysWithValues: distances)
+        
+        return zip(results, results.map { distanceMap[$0.rottenId] ?? Double.infinity })
+            .sorted { leftMovie, rightMovie in
+                if leftMovie.0.title.lowercased() == priorityTitle.lowercased() {
+                    return true
+                } else {
+                    return leftMovie.1 < rightMovie.1
+                }
+            }
+            .map { $0.0.rottenId }
+    }
+    
+    public func fetchMoviePersonDTOs(_ fetchDescription: consuming FetchDescriptor<MoviePerson>) async throws -> [MoviePersonDTO] {
+        let results = try self.modelContext.fetch(fetchDescription)
+        return results.map { MoviePersonDTO(from: $0) }
+    }
+    
+    public func updateMovieScores(_ updates: [(id: PersistentIdentifier, score: Double)]) async throws {
+        for update in updates {
+            if let movie = self.modelContext.model(for: update.id) as? Movie {
+                movie.contentionScore = update.score
+            }
+        }
+    }
+    
+    public func fetchAndPrepareMovies(_ fetchDescription: FetchDescriptor<Movie>) async throws -> [MovieDTO] {
+        let context = modelExecutor.modelContext
+        let results = try context.fetch(fetchDescription)
+        results.enumerated().forEach { idx, movie in
+            movie.positionIndex = idx
+        }
+        return results.map { MovieDTO(from: $0) }
+    }
+    
+    public func withFetchResult<N, T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (consuming [T], isolated MovieDatabaseActor) async throws -> N) async throws -> N {
+        let results = try self.modelContext.fetch(fetchDescription)
+        let returnValue = try await closure(results, self)
+        return returnValue
+    }
+    
+    public func withFetchResult<T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (consuming [T], isolated MovieDatabaseActor) async throws -> Void) async throws {
+        let results = try self.modelContext.fetch(fetchDescription)
+        try await closure(results, self)
+    }
+    
+    public func withMutableFetchResult<T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (inout [T], isolated MovieDatabaseActor) async throws -> Void) async throws {
         var results = try self.modelContext.fetch(fetchDescription)
-        try await closure(&results)
+        try await closure(&results, self)
     }
     
     public static func loadModel(overwrite : Bool) async throws -> MovieDatabaseActor {

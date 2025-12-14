@@ -24,7 +24,7 @@ public struct MovieEdge : Identifiable {
     public let directors : Bool
     public let actors : Bool
     
-    public init(_ aNode : borrowing Movie, _ bNode : borrowing Movie) throws(MovieEdgeError) {
+    public init(_ aNode : borrowing MovieDTO, _ bNode : borrowing MovieDTO) throws(MovieEdgeError) {
         
         let areThereSharedWriters = Self.findSharedPeople(between: aNode.writers, and: bNode.writers)
         let areThereSharedDirectors = Self.findSharedPeople(between: aNode.directors, and: bNode.directors)
@@ -43,17 +43,12 @@ public struct MovieEdge : Identifiable {
         self.aNodePositionIndex = aIdx
         self.bNodePositionIndex = bIdx
         
-        aNode.movieConnections.append(bNode.rottenId)
-        bNode.movieConnections.append(aNode.rottenId)
-        
-        //self.weight = Double(writer.intValue + director.intValue + performer.intValue) / 3
-        
         self.writers = areThereSharedWriters
         self.directors = areThereSharedDirectors
         self.actors = areThereSharedActors
     }
     
-    private static func findSharedPeople(between moviePeopleA : consuming [MoviePerson], and moviePeopleB : consuming [MoviePerson]) -> Bool {
+    private static func findSharedPeople(between moviePeopleA : consuming [MoviePersonDTO], and moviePeopleB : consuming [MoviePersonDTO]) -> Bool {
         let moviePeopleASet : Set<String> = Set(moviePeopleA.map(\.name))
         let moviePeopleBSet : Set<String> = Set(moviePeopleB.map(\.name))
         

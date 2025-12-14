@@ -15,11 +15,6 @@ struct VertexOut {
     float  pointSize [[point_size]];
 };
 
-struct ScreenTransform {
-    float2 offset;
-    float2 scale;
-};
-
 vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
                             constant ScreenTransform& transform [[ buffer(1) ]],
                             uint vertexId [[ vertex_id ]]) {

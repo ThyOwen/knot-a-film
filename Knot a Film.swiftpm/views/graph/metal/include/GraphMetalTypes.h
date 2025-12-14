@@ -9,6 +9,11 @@
 #define NUM_BODIES 4096
 #define MAX_NODES 349525
 
+struct ScreenTransform {
+    simd_float2 offset;
+    simd_float2 scale;
+};
+
 struct PhysicsParams {
     float gravity;
     float epsilon;

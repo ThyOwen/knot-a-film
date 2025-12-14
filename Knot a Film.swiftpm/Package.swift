@@ -51,8 +51,7 @@ let package = Package(
                 .copy("Resources/mlmodels")
             ],
             swiftSettings: [
-                .enableUpcomingFeature("BareSlashRegexLiterals"),
-                .swiftLanguageMode(.v5)
+                .swiftLanguageMode(.v6)
             ]
         ),
         .target(

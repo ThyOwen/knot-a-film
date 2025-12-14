@@ -51,32 +51,27 @@ import Accelerate
                          databaseActor: databaseActor)
     }
     
-    public func recommend(using promptMovieId : String, numSteps : Int = 2) async throws -> [Movie] {
+    public func recommend(using promptMovieId : String, numSteps : Int = 2) async throws -> [MovieDTO] {
 
         let promptMovieDescription = FetchDescriptor<Movie>(
             predicate: #Predicate { $0.rottenId == promptMovieId }
         )
         
-        let promptMovie = try await self.databaseActor.withFetchResult(promptMovieDescription) { return $0.first }
+        let promptMovies = try await self.databaseActor.fetchMovieDTOs(promptMovieDescription)
         
-        guard let promptMovie else {
+        guard let promptMovie = promptMovies.first else {
             throw ViewModelError.failedToFindPromptMovie
         }
             
 
         //async let initalRoleNeighbors : [(String, NLDistance)] = try self.getMovieNeighborsBasedOnRoles(promptMovie: promptMovie)
 
-        async let initialPromptNeighbors : [(String, NLDistance)] = try self.findSimilarMovie(to: promptMovieId)
+        let initialPromptNeighbors = try self.findSimilarMovie(to: promptMovieId)
 
-        let initialNeighbors = try await initialPromptNeighbors// + initalRoleNeighbors
+        let initialNeighbors = initialPromptNeighbors// + initalRoleNeighbors
         
-        var neighbors = initialNeighbors
+        let neighbors = initialNeighbors
 
-        var stepCount : Int = 0
-
-        
-        await self.recursiveRecommend(addingTo: &neighbors, using: initialNeighbors, at: &stepCount, upTo: numSteps)
-        
         let neighborsDictionary : [String: [NLDistance]] = Dictionary(grouping: neighbors, by: { $0.0 })
             .mapValues { movies in
                 movies.map { movie in
@@ -90,20 +85,22 @@ import Accelerate
             }
         )
         
-        var movies = try await self.databaseActor.withFetchResult(neighborsDescription) { movies in
-            try await self.calculateRelevanceScores(with: promptMovie, using: neighborsDictionary)
-            return movies
-        }
-
-        movies.sort { lhs, rhs in
+        let promptGenres = promptMovie.genres
+        let promptReleaseDate = promptMovie.originalReleaseDate
+        
+        var neighborDTOs = try await self.databaseActor.fetchMovieDTOs(neighborsDescription)
+        
+        try await self.calculateRelevanceScoresForDTOs(with: promptGenres, releaseDate: promptReleaseDate, using: neighborsDictionary, for: &neighborDTOs)
+        
+        neighborDTOs.sort { lhs, rhs in
             lhs.contentionScore > rhs.contentionScore
         }
         
-        for movie in movies {
+        for movie in neighborDTOs {
             print(movie.contentionScore, movie.title)
         }
         
-        return movies
+        return neighborDTOs
     }
 
     
@@ -169,9 +166,7 @@ import Accelerate
             }
         )
 
-        let neighborsEmbeddingsIds = try await databaseActor.withFetchResult(rolesFetch) { movies in
-            return movies.map { DescriptionEmbeddingsInput(text: $0.rottenId) }
-        }
+        let neighborsEmbeddingsIds = try await databaseActor.fetchMovieDTOs(rolesFetch).map { DescriptionEmbeddingsInput(text: $0.rottenId) }
         
         let promptEmbedding = try descriptionEmbedding.prediction(input: .init(text: promptMovie.rottenId))
         
@@ -182,77 +177,34 @@ import Accelerate
         return neighborDistances
     }
     
-    private func recursiveRecommend(addingTo neighbors : inout [(String, NLDistance)],
-                                 using initialNeighbors : consuming [(String, NLDistance)],
-                                 at stepCount : inout Int,
-                                 upTo stepLimit : consuming Int) async {
-        
-        let embeddings = (consume initialNeighbors).compactMap { movieId, _  in
-            try? self.descriptionEmbedding.prediction(input: .init(text: movieId))
-        }
-
-        await withTaskGroup(of: [(String, NLDistance)]?.self) { group in
-            embeddings.forEach { neighbor in
-                group.addTask {
-                    try? self.findSimilarMovie(using: neighbor.vector)
-                }
-            }
-            
-            var newNeighbors : [(String, NLDistance)] = []
-            
-            for await result in group.compactMap(\.self) {
-                newNeighbors.append(contentsOf: result)
-            }
-            
-            neighbors.append(contentsOf: newNeighbors)
-            
-            stepCount += 1
-            
-            if stepCount < stepLimit {
-                await self.recursiveRecommend(addingTo: &neighbors, using: newNeighbors, at: &stepCount, upTo: stepLimit)
-            }
-        }
-    }
     
-    private func calculateRelevanceScores(with promptMovie : Movie, using neighborsDictionary : consuming [String: [NLDistance]]) async throws {
+    private func calculateRelevanceScoresForDTOs(with promptGenres: Set<Genre>, releaseDate promptReleaseDate: Date?, using neighborsDictionary: consuming [String: [NLDistance]], for movies: inout [MovieDTO]) async throws {
         
-        let neighborsDescription = FetchDescriptor<Movie>(
-            predicate: #Predicate { neighborsDictionary.keys.contains($0.rottenId) }
-        )
-        
-        try await self.databaseActor.withMutableFetchResult(neighborsDescription) { [neighborsDictionary] movies in
-
-            await withDiscardingTaskGroup { group in
-                movies.forEach { movie in
-                    group.addTask {
-                        guard let array = neighborsDictionary[movie.rottenId] else {
-                            return
-                        }
-                        
-                        async let nlpScore = 0.5 * (vDSP.sum(array) / Double(array.count))
-                        
-                        async let genreScore = 0.1 * (Double(promptMovie.genres.intersection(movie.genres).count) / Double(promptMovie.genres.count))
-
-                        async let viewerScore = 0.3 * (Double(movie.tomatoMeterRating ?? 0) + Double(movie.audienceRating ?? 0)) / 200
-
-                        let releaseScore : Double
-                        
-                        if let promptDate = promptMovie.originalReleaseDate, let movieDate = movie.originalReleaseDate {
-                            let promptYear = Calendar.current.component(.year, from: promptDate)
-                            let movieYear = Calendar.current.component(.year, from: movieDate)
-                            
-                            releaseScore = 0.2 * (1 - (Double(abs(promptYear - movieYear)) / 100))
-                        } else {
-                            releaseScore = 0
-                        }
-
-                        let finalScore = await nlpScore + releaseScore + genreScore + viewerScore
-
-                        movie.contentionScore = finalScore
-                        
-                    }
-                }
+        for i in 0..<movies.count {
+            guard let array = neighborsDictionary[movies[i].rottenId] else {
+                continue
             }
+            
+            let nlpScore = 0.5 * (vDSP.sum(array) / Double(array.count))
+            
+            let genreScore = 0.1 * (Double(promptGenres.intersection(movies[i].genres).count) / Double(promptGenres.count))
+
+            let viewerScore = 0.3 * (Double(movies[i].tomatoMeterRating ?? 0) + Double(movies[i].audienceRating ?? 0)) / 200
+
+            let releaseScore : Double
+            
+            if let promptDate = promptReleaseDate, let movieDate = movies[i].originalReleaseDate {
+                let promptYear = Calendar.current.component(.year, from: promptDate)
+                let movieYear = Calendar.current.component(.year, from: movieDate)
+                
+                releaseScore = 0.2 * (1 - (Double(abs(promptYear - movieYear)) / 100))
+            } else {
+                releaseScore = 0
+            }
+
+            let finalScore = nlpScore + releaseScore + genreScore + viewerScore
+
+            movies[i].contentionScore = finalScore
         }
     }
 }

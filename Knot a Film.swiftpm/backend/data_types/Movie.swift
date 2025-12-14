@@ -12,7 +12,7 @@ public enum MovieParseError : Error {
     case missingRequiredFields
 }
 
-@Model public class Movie {
+@Model public class Movie : Equatable  {
     @Transient public var contentionScore : Double = 0
     @Transient public var positionIndex : Int? = nil
     @Transient public var movieConnections : [String] = []
@@ -155,12 +155,92 @@ public enum MovieParseError : Error {
         }
     }
     
-    
-}
-
-extension Movie: Equatable {
     public static func == (lhs: borrowing Movie, rhs: borrowing Movie) -> Bool {
         lhs.id == rhs.id
+    }
+}
+
+public struct MovieDTO: Identifiable, Sendable, Hashable {
+    public let id: String
+    public let persistentID: PersistentIdentifier
+    public let rottenId: String
+    public let title: String
+    public let info: String
+    public let criticsConsensus: String
+    public let contentRating: ContentRating
+    public let genres: Set<Genre>
+    
+    public let originalReleaseDate: Date?
+    public let streamingReleaseDate: Date?
+    public let runtime: Int?
+    public let productionCompany: String
+    public let studio: Studio
+    
+    public let tomatoMeterStatus: CriticsStatus
+    public let tomatoMeterRating: Int?
+    public let tomatoMeterCount: Int?
+    
+    public let audienceStatus: AudienceStatus
+    public let audienceRating: Int?
+    public let audienceCount: Int?
+    
+    public let dateWatched: Date?
+    
+    public let colorsString: String
+    
+    // Relationships
+    public let writers: [MoviePersonDTO]
+    public let directors: [MoviePersonDTO]
+    public let actors: [MoviePersonDTO]
+    
+    // Transient properties for UI
+    public var contentionScore: Double = 0
+    public var positionIndex: Int? = nil
+    public var movieConnections: [String] = []
+    
+    init(from movie: Movie) {
+        self.id = movie.rottenId
+        self.persistentID = movie.id
+        self.rottenId = movie.rottenId
+        self.title = movie.title
+        self.info = movie.info
+        self.criticsConsensus = movie.criticsConsensus
+        self.contentRating = movie.contentRating
+        self.genres = movie.genres
+        
+        self.originalReleaseDate = movie.originalReleaseDate
+        self.streamingReleaseDate = movie.streamingReleaseDate
+        self.runtime = movie.runtime
+        self.productionCompany = movie.productionCompany
+        self.studio = movie.studio
+        
+        self.tomatoMeterStatus = movie.tomatoMeterStatus
+        self.tomatoMeterRating = movie.tomatoMeterRating
+        self.tomatoMeterCount = movie.tomatoMeterCount
+        
+        self.audienceStatus = movie.audienceStatus
+        self.audienceRating = movie.audienceRating
+        self.audienceCount = movie.audienceCount
+        
+        self.dateWatched = movie.dateWatched
+        
+        self.colorsString = movie.colorsString
+        
+        self.writers = movie.writers.map { MoviePersonDTO(from: $0) }
+        self.directors = movie.directors.map { MoviePersonDTO(from: $0) }
+        self.actors = movie.actors.map { MoviePersonDTO(from: $0) }
+        
+        self.contentionScore = movie.contentionScore
+        self.positionIndex = movie.positionIndex
+        self.movieConnections = movie.movieConnections
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(persistentID)
+    }
+    
+    public static func == (lhs: MovieDTO, rhs: MovieDTO) -> Bool {
+        lhs.persistentID == rhs.persistentID
     }
 }
 

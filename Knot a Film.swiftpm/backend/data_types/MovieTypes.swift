@@ -7,7 +7,7 @@
 import Foundation
 import SwiftUI
 
-public enum Genre: String, Codable, CaseIterable {
+public enum Genre: String, Codable, CaseIterable, Sendable {
     case actionAdventure = "Action & Adventure"
     case animation = "Animation"
     case comedy = "Comedy"
@@ -76,7 +76,7 @@ public enum Genre: String, Codable, CaseIterable {
     
 }
 
-public enum ContentRating: String, Codable {
+public enum ContentRating: String, Codable, Sendable {
     case pg = "PG"
     case g = "G"
     case r = "R"
@@ -85,20 +85,20 @@ public enum ContentRating: String, Codable {
     case none = ""
 }
 
-public enum AudienceStatus: String, Codable {
+public enum AudienceStatus: String, Codable, Sendable {
     case upright = "Upright"
     case spilled = "Spilled"
     case none = ""
 }
 
-public enum CriticsStatus: String, Codable {
+public enum CriticsStatus: String, Codable, Sendable {
     case fresh = "Fresh"
     case certifiedFresh = "Certified-Fresh"
     case rotten = "Rotten"
     case none = ""
 }
 
-public enum Studio: String, Codable, CaseIterable {
+public enum Studio: String, Codable, CaseIterable, Sendable {
     case other
     case hulu = "Hulu"
     case twentiethCentury = "20th Century"

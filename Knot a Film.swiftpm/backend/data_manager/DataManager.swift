@@ -13,7 +13,7 @@ import CoreData
 
 public struct DataManager : ~Copyable {
     
-    private static let regex : Regex = /(?:,"|^")(""|[\w\W]*?)(?=",|"$)|(?:,(?!")|^(?!"))([^,]*?)(?=$|,)|(\r\n|\n)/
+    private nonisolated(unsafe) static let regex : Regex = /(?:,"|^")(""|[\w\W]*?)(?=",|"$)|(?:,(?!")|^(?!"))([^,]*?)(?=$|,)|(\r\n|\n)/
     
     @MainActor public static func createDatabase(with modelContainer : borrowing ModelContainer) async throws {
         print("loading CSV file...")
@@ -26,7 +26,7 @@ public struct DataManager : ~Copyable {
 
         let moviePeople : [MoviePerson] = await Self.getMoviePeople(allParsedRows)
         
-        let movies : [Movie] = await Self.getMovies(allParsedRows, moviePeople: moviePeople)
+        let movies : [Movie] = Self.getMovies(allParsedRows, moviePeople: moviePeople)
         
         for movie in movies {
             movie.updateMoviePeople()
@@ -84,12 +84,9 @@ public struct DataManager : ~Copyable {
     private static func parseCSVTable(_ csvRows : consuming [String]) async -> [[Substring]] {
         await withTaskGroup(of: [Substring]?.self, returning: [[Substring]].self) { group in
             
-            var numOfSuccessfullyParsedRows : Int = 0
-            
             csvRows.forEach { csvRow in
-                group.addTask {
+                group.addTask { @Sendable in
                     if let parsedRow = try? Self.regexParseCSVRow(row: csvRow) {
-                        numOfSuccessfullyParsedRows += 1
                         return parsedRow
                     } else {
                         return nil
@@ -110,23 +107,19 @@ public struct DataManager : ~Copyable {
     private static func getMoviePeople(_ parsedRows : borrowing [[Substring]]) async -> [MoviePerson] {
         let peopleArray = await withTaskGroup(of: [(Substring, MovieRole)].self, returning: [(Substring, MovieRole)].self) { group in
             
-            var numOfSuccessfullyParsedMoviePeople : Int = 0
-            
             parsedRows.forEach { parsedRow in
-                group.addTask {
+                group.addTask { @Sendable in
                     async let writerArray = parsedRow[7].split(separator: ",").map { ($0, MovieRole.writer) }
                     async let directorArray =  parsedRow[6].split(separator: ",").map { ($0, MovieRole.director) }
                     async let actorArray =  parsedRow[8].split(separator: ",").map { ($0, MovieRole.actor) }
                     
                     let peopleArray = await (writerArray + actorArray + directorArray)
                     
-                    numOfSuccessfullyParsedMoviePeople += peopleArray.count
                     return peopleArray
                 }
             }
             
             var moviePeople : [(Substring, MovieRole)] = []
-            moviePeople.reserveCapacity(numOfSuccessfullyParsedMoviePeople)
             
             for await person in group {
                 moviePeople += consume person
@@ -188,34 +181,19 @@ public struct DataManager : ~Copyable {
 
     }
     */
-    private static func getMovies(_ parsedRows : consuming [[Substring]], moviePeople : borrowing [MoviePerson]) async -> [Movie] {
-        await withTaskGroup(of: Movie?.self, returning: [Movie].self) { group in
-            
-            var numOfSuccessfullyParsedMovies : Int = 0
-            
-            moviePeople.withDictionaryAccess { moviePeopleDictionary in
-                parsedRows.forEach { parsedRow in
-                    group.addTask {
-                        let movie = try? Movie(parsedCSVRow: parsedRow, moviePeople: moviePeopleDictionary)
-                        if let movie {
-                            numOfSuccessfullyParsedMovies += 1
-                            return movie
-                        } else {
-                            return nil
-                        }
-                    }
+    private static func getMovies(_ rows : [[Substring]], moviePeople : [MoviePerson]) -> [Movie] {
+        var movies: [Movie] = []
+        movies.reserveCapacity(rows.count)
+        
+        moviePeople.withDictionaryAccess { moviePeopleDictionary in
+            for parsedRow in rows {
+                if let movie = try? Movie(parsedCSVRow: parsedRow, moviePeople: moviePeopleDictionary) {
+                    movies.append(movie)
                 }
             }
-            
-            var movies : [Movie] = []
-            movies.reserveCapacity(numOfSuccessfullyParsedMovies)
-            
-            for await movie in group.compactMap( \.self ) {
-                movies.append(consume movie)
-            }
-            
-            return movies
         }
+        
+        return movies
     }
     
 }

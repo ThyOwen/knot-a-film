@@ -7,18 +7,13 @@
 
 import SwiftUI
 import SwiftData
+import SharedWithMetal
 
 extension Bool {
     var intValue: Int {
         return self ? 1 : 0
     }
 }
-
-public struct ScreenTransform {
-    var offset : SIMD2<Float32> = .init(x: 0, y: 0)
-    var zoom : SIMD2<Float32> = .init(x: 0.5, y: 0.5)
-}
-
 
 enum ZoomGestureState {
     case inactive
@@ -99,7 +94,7 @@ struct NodeGraphView: View {
                     Float32(self.initialScale * scale)
                 }
                 
-                self.graph.graph?.renderer.screenTransform.zoom = .init(scale, scale)
+                self.graph.graph?.renderer.screenTransform.scale = .init(scale, scale)
 
             }
     }

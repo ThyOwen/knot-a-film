@@ -18,7 +18,7 @@ struct PosterView: View {
     @Environment(\.shader) var shader : (_ strength : CGFloat) -> Shader
 
     
-    @Bindable public var movie : Movie
+    public let movie : MovieDTO
     @Binding public var isCollapsed : Bool
 
     private let cornerRadius : CGFloat = 20

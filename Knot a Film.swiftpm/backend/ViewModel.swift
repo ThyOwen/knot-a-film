@@ -64,8 +64,8 @@ public enum ViewModelError : Error {
                 print("recomendation engine is nil")
                 return
             }
-            
-            try await searchEngine.search(basedOn: likelyMisspelledUserTitle)
+            nonisolated(unsafe) let engine = searchEngine
+            try await engine.search(basedOn: likelyMisspelledUserTitle)
 
         }
         
@@ -84,9 +84,6 @@ public enum ViewModelError : Error {
         let movies = try await databaseActor.withModelContext { modelContext in
             try modelContext.fetch(directorFetch)
         }
-        
-        print(movies.count)
-
 
         for idx in movies.indices {
             movies[idx].dateWatched = .now

@@ -39,3 +39,21 @@ extension MoviePerson: Equatable  {
         lhs.id == rhs.id
     }
 }
+
+public struct MoviePersonDTO: Sendable, Identifiable, Hashable {
+    public let id: PersistentIdentifier
+    public let name: String
+    public let movieRoles: Set<MovieRole>
+    public let numMovies: Int
+    
+    public init(from model: MoviePerson) {
+        self.id = model.id
+        self.name = model.name
+        self.movieRoles = model.movieRoles
+        self.numMovies = model.numMovies
+    }
+    
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}

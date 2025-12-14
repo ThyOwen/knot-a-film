@@ -15,7 +15,7 @@ import SwiftData
 
     public let renderer : GraphRenderer
     
-    public let nodes : [Movie]
+    public let nodes : [MovieDTO]
     public let edges : [MovieEdge]
     
     public var userTranslate : UnitPoint = .center
@@ -27,13 +27,12 @@ import SwiftData
     public let isCircularized : Bool = false
     
     
-    public required init(of watchedMovies : consuming [Movie]) {
+    public required init(of watchedMovies : consuming [MovieDTO]) {
 
         let edges = Self.findConnections(between: watchedMovies)
         print(edges.count)
         let connectionsIndices : [SIMD2<UInt32>] = edges.map { SIMD2<UInt32>(UInt32($0.aNodePositionIndex), UInt32($0.bNodePositionIndex)) }
         
-        print(connectionsIndices.count)
         self.nodes = consume watchedMovies
         self.edges = edges
         self.renderer = .init(connections: connectionsIndices)
@@ -53,25 +52,19 @@ import SwiftData
         }
     }
     
-    public static func create(with databaseActor : borrowing MovieDatabaseActor, using predicate : Predicate<Movie>) async throws -> Self {
+    @MainActor
+    public static func create(with databaseActor : MovieDatabaseActor, using predicate : Predicate<Movie>) async throws -> Self {
 
         let watchedMoviesFetch = FetchDescriptor<Movie>(
             predicate: predicate
         )
 
-        let graph = try await databaseActor.withFetchResult(watchedMoviesFetch) { watchedMovies in
-            watchedMovies.enumerated().forEach { idx, movie in
-                movie.positionIndex = idx
-            }
-            return await Self.init(of: watchedMovies)
-        }
-                
-        return graph
-
+        let movies = try await databaseActor.fetchAndPrepareMovies(watchedMoviesFetch)
+        return Self.init(of: movies)
     }
     
     //MARK: - Connections
-    private static func findConnections(between watchedMovies : borrowing [Movie]) -> [MovieEdge] {
+    private static func findConnections(between watchedMovies : borrowing [MovieDTO]) -> [MovieEdge] {
         
         var edges : [MovieEdge] = []
         

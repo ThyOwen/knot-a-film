@@ -5,14 +5,6 @@
 //  Created by Owen O'Malley on 2/15/25.
 //
 
-
-//
-//  test.swift
-//  Brain
-//
-//  Created by Owen O'Malley on 2/3/24.
-//
-
 import SwiftUI
 
 public enum SheetViewGestureState {

@@ -78,12 +78,3 @@ public enum DragGestureState {
     }
 }
 
-
-#Preview {
-    @Previewable @State var viewModel : ViewModel = .init()
-    ZStack {
-        if let graph = viewModel.graph {
-            ThemeColors.mainAccent.ignoresSafeArea()
-        }
-    }
-}

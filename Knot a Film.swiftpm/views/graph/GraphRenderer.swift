@@ -13,7 +13,6 @@ public struct GraphParams {
     let edgeRepulsion : Double = 0.10
     let edgeAttraction : Double = 0.1
     
-    // Tree construction parameters
     let maxDepth: Int32 = 9
     static let nLeaf: Int32 = 262144
     
@@ -63,7 +62,7 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
     
     public var params : GraphParams
     
-    public var screenTransform : ScreenTransform = .init(offset: .zero, zoom: .init(1.0, 1.0))
+    public var screenTransform : ScreenTransform = .init(offset: .zero, scale: .init(1.0, 1.0))
         
     init(connections : [SIMD2<UInt32>]) {
 
@@ -136,7 +135,6 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
         
         computeEncoder.setBytes(&self.params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 2)
         
-        // Set threadgroup memory for tileB array
         let tileBlockMemSize = MemoryLayout<Body>.stride * Int(self.params.blockSize)
         computeEncoder.setThreadgroupMemoryLength(tileBlockMemSize, index: 0)
     
@@ -253,7 +251,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     let numConnections : Int
 
 
-    public var screenTransform : ScreenTransform = .init(offset: .zero, zoom: .init(1.0, 1.0))
+    public var screenTransform : ScreenTransform = .init(offset: .zero, scale: .init(1.0, 1.0))
 
     private let threadgroupSize = MTLSize(width: 256, height: 1, depth: 1)
     
@@ -319,7 +317,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let library = try! device.makeDefaultLibrary(bundle: .main)
         
         //render
-        let vertexDescriptor = GraphRendererDirectSum.makeBodyVertexDescriptor()
+        //let vertexDescriptor = GraphRendererDirectSum.makeBodyVertexDescriptor()
         
         let bodyPipelineDescriptor = MTLRenderPipelineDescriptor()
         bodyPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexBody")
