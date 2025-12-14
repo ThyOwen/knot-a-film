@@ -152,29 +152,29 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
     }
 
     static public func initRandomBodies(params : borrowing GraphParams) -> [Body] {
-        let maxDistance = Float16(MAX_DIST)
-        let minDistance = Float16(MIN_DIST)
+        let maxDistance = Float32(MAX_DIST)
+        let minDistance = Float32(MIN_DIST)
         let numBodies = Int(params.numBodies)
         
-        let centerPos = SIMD2<Float16>(x: Float16(CENTERX), y: Float16(CENTERY))
+        let centerPos = SIMD2<Float32>(x: Float32(CENTERX), y: Float32(CENTERY))
 
         var bodies : [Body] = .init(repeating: Body(), count: numBodies)
         
         for i in 0..<(numBodies - 1) {
             let angle : Float32 = 2.0 * Float32.pi * Float32.random(in: 0...1)
-            let radius : Float16 = (maxDistance - minDistance) * Float16.random(in: 0...1) + minDistance
+            let radius : Float32 = (maxDistance - minDistance) * Float32.random(in: 0...1) + minDistance
 
-            let x = centerPos.x + radius * Float16(cos(angle))
-            let y = centerPos.y + radius * Float16(sin(angle))
-            let position = SIMD2<Float16>(x: x, y: y)
+            let x = centerPos.x + radius * Float32(cos(angle))
+            let y = centerPos.y + radius * Float32(sin(angle))
+            let position = SIMD2<Float32>(x: x, y: y)
             
             let body : Body = .init(
                 isDynamic: true,
                 mass: 1,//Float(EARTH_MASS),
                 radius: 1,//Float(EARTH_DIA),
                 position: position,
-                velocity: SIMD2<Float16>(x: 0.0, y: 0.0),
-                acceleration: SIMD2<Float16>(x: 0.0, y: 0.0)
+                velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
+                acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
             )
             bodies[i] = body
         }
@@ -184,8 +184,8 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
             mass: Float(SUN_MASS),
             radius: Float(SUN_DIA),
             position: centerPos,
-            velocity: SIMD2<Float16>(x: 0.0, y: 0.0),
-            acceleration: SIMD2<Float16>(x: 0.0, y: 0.0)
+            velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
+            acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
         )
         
         bodies[numBodies - 1] = body
@@ -225,7 +225,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
     public var screenTransform : ScreenTransform = .init(offset: .zero, zoom: .init(1.0, 1.0))
 
-    private let threadgroupSize = MTLSize(width: 576, height: 1, depth: 1)
+    private let threadgroupSize = MTLSize(width: 512, height: 1, depth: 1)
     
     public init(connections : [SIMD2<UInt32>]) {
 
@@ -251,7 +251,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
                 bodiesPtr.advanced(by: i).pointee = body
             }
         }
-        bodyDataPtr.pointee.numBodies = params.numBodies
+        bodyDataPtr.pointee.numBodies = uint(params.numBodies)
         
         let bodyDataAltPtr = bodyBufferAlt.contents().bindMemory(to: BodyData.self, capacity: 1)
         withUnsafeMutablePointer(to: &bodyDataAltPtr.pointee.bodies.0) { bodiesPtr in
@@ -259,13 +259,13 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
                 bodiesPtr.advanced(by: i).pointee = body
             }
         }
-        bodyDataAltPtr.pointee.numBodies = params.numBodies
+        bodyDataAltPtr.pointee.numBodies = uint(params.numBodies)
         
         //Nodes
         let nodeSize = MemoryLayout<NodeData>.stride
         self.nodeBuffer = device.makeBuffer(length: nodeSize, options: .storageModeShared)!
         let nodeDataPtr = nodeBuffer.contents().bindMemory(to: NodeData.self, capacity: 1)
-        nodeDataPtr.pointee.numNodes = params.numNodes
+        nodeDataPtr.pointee.numNodes = uint(params.numNodes)
         
         //Connections
         let coalescedIndicesSize = MemoryLayout<ConnectionsData>.stride
@@ -398,7 +398,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
             let countMemSize = MemoryLayout<Int32>.stride * 8
             let massMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
-            let centerMemSize = MemoryLayout<SIMD2<Float16>>.stride * threadgroupSize.width
+            let centerMemSize = MemoryLayout<SIMD2<Float32>>.stride * threadgroupSize.width
             encoder.setThreadgroupMemoryLength(countMemSize, index: 0)
             encoder.setThreadgroupMemoryLength(massMemSize, index: 1)
             encoder.setThreadgroupMemoryLength(centerMemSize, index: 2)

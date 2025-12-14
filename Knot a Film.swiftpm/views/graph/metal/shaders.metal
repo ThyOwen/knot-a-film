@@ -29,17 +29,17 @@ vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
     
     uint nodeIndex = vertexId / 8;
     uint corner    = vertexId % 8;
-
+    
     Node node = nodeData.nodes[nodeIndex];
-
-    half2 topLeft = node.topLeft;
-    half2 bottomRight = node.bottomRight;
-
-    half2 topRight = half2(node.bottomRight.x, node.topLeft.y);
-    half2 bottomLeft = half2(node.topLeft.x, node.bottomRight.y);
+    
+    float2 topLeft = node.topLeft;
+    float2 bottomRight = node.bottomRight;
+    
+    float2 topRight = { node.bottomRight.x, node.topLeft.y };
+    float2 bottomLeft = { node.topLeft.x, node.bottomRight.y };
 
     // The 2 triangles that make a box
-    half2 corners[8] = {
+    float2 corners[8] = {
         topLeft, topRight,
         topRight, bottomRight,
         bottomRight, bottomLeft,

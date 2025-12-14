@@ -34,9 +34,9 @@
 #define HBL 1.6e29
 
 struct Node {
-    simd_half2 topLeft;
-    simd_half2 bottomRight;
-    simd_half2 centerOfMass;
+    simd_float2 topLeft;
+    simd_float2 bottomRight;
+    simd_float2 centerOfMass;
     
     float totalMass;
     uint start;
@@ -48,28 +48,28 @@ struct Body {
     bool isDynamic;
     float mass;
     float radius;
-    simd_half2 position;
-    simd_half2 velocity;
-    simd_half2 acceleration;
+    simd_float2 position;
+    simd_float2 velocity;
+    simd_float2 acceleration;
 };
 
 
 struct NodeData {
     struct Node nodes[MAX_NODES];
-    int numNodes;
+    uint numNodes;
 };
 
 struct BodyData {
     struct Body bodies[NUM_BODIES];
-    int numBodies;
+    uint numBodies;
 };
 
 struct PerBodyConnectionsData {
     uint perBodyConnections[MAX_CONNECTIONS];
-    int numConnections;
+    uint numConnections;
 };
 
 struct ConnectionsData {
     struct PerBodyConnectionsData connections[NUM_BODIES];
-    int numBodiesWithConnections;
+    uint numBodiesWithConnections;
 };

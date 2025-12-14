@@ -94,10 +94,10 @@ kernel void computeBoundingBoxKernel(device NodeData &nodeData [[buffer(0)]],
         
 
         //bounding of the quad tree construction with some padding that is super gittery
-        half rangeX = topLeftX[0] - bottomRightX[0];
-        half rangeY = topLeftY[0] - bottomRightY[0];
-        half paddingX = max(abs(rangeX) * 0.01h, 0.1h);
-        half paddingY = max(abs(rangeY) * 0.01h, 0.1h);
+        float rangeX = topLeftX[0] - bottomRightX[0];
+        float rangeY = topLeftY[0] - bottomRightY[0];
+        float paddingX = max(abs(rangeX) * 0.01f, 0.1f);
+        float paddingY = max(abs(rangeY) * 0.01f, 0.1f);
         
         nodeData.nodes[0].topLeft.x = fmin(nodeData.nodes[0].topLeft.x, topLeftX[0] - paddingX);
         nodeData.nodes[0].topLeft.y = fmax(nodeData.nodes[0].topLeft.y, topLeftY[0] + paddingY);
@@ -114,8 +114,8 @@ CONSTRUCT QUAD TREE
 ----------------------------------------------------------------------------------------
 */
 
-inline int getQuadrant(half2 topLeft,
-                       half2 bottomRight,
+inline int getQuadrant(float2 topLeft,
+                       float2 bottomRight,
                        float x,
                        float y)
 {
@@ -135,7 +135,7 @@ inline int getQuadrant(half2 topLeft,
     }
 }
 
-inline void updateChildBound(half2 tl, half2 br,
+inline void updateChildBound(float2 tl, float2 br,
                              thread Node &childNode,
                              int quadrant)
 {
@@ -155,7 +155,7 @@ inline void updateChildBound(half2 tl, half2 br,
 }
 
 inline void warpReduce(threadgroup volatile float* __restrict__ totalMass,
-                       threadgroup volatile half2* __restrict__ centerOfMass,
+                       threadgroup volatile float2* __restrict__ centerOfMass,
                        uint tid)
 {
     totalMass[tid] += totalMass[tid + 32];
@@ -175,7 +175,7 @@ inline void warpReduce(threadgroup volatile float* __restrict__ totalMass,
 inline void computeCenterOfMass(thread Node &curNode,
                                 device BodyData &bodyData,
                                 threadgroup float* __restrict__ totalMass,
-                                threadgroup half2* __restrict__ centerOfMass,
+                                threadgroup float2* __restrict__ centerOfMass,
                                 int start,
                                 int end,
                                 uint tid,
@@ -185,7 +185,7 @@ inline void computeCenterOfMass(thread Node &curNode,
     int sz = (total + threadgroup_size - 1) / threadgroup_size;
     int s = tid * sz + start;
     float M = 0.0;
-    half2 R = half2(0.0, 0.0);
+    float2 R = { 0.0, 0.0 };
 
     for (int i = s; i < s + sz; ++i) {
         if (i <= end) {
@@ -216,13 +216,13 @@ inline void computeCenterOfMass(thread Node &curNode,
         centerOfMass[0].x /= totalMass[0];
         centerOfMass[0].y /= totalMass[0];
         curNode.totalMass = totalMass[0];
-        curNode.centerOfMass = half2(centerOfMass[0].x, centerOfMass[0].y);
+        curNode.centerOfMass = centerOfMass[0];
     }
 }
 
 inline void countBodies(device BodyData &bodyData, 
-                        half2 topLeft,
-                        half2 bottomRight,
+                        float2 topLeft,
+                        float2 bottomRight,
                         threadgroup int* __restrict__ count,
                         int start,
                         int end,
@@ -258,8 +258,8 @@ inline void computeOffset(threadgroup int* __restrict__ count,
 
 inline void groupBodies(device BodyData &bodyData, 
                         device BodyData &bufferData, 
-                        half2 topLeft,
-                        half2 bottomRight,
+                        float2 topLeft,
+                        float2 bottomRight,
                         threadgroup int* __restrict__ count,
                         int start,
                         int end,
@@ -284,7 +284,7 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
                                     constant int &leafLimit [[buffer(4)]],
                                     threadgroup int* __restrict__ count [[threadgroup(0)]],
                                     threadgroup float* __restrict__ totalMass [[threadgroup(1)]],
-                                    threadgroup half2* __restrict__ centerOfMass [[threadgroup(2)]],
+                                    threadgroup float2* __restrict__ centerOfMass [[threadgroup(2)]],
                                     uint tid [[thread_position_in_threadgroup]],
                                     uint bid [[threadgroup_position_in_grid]],
                                     uint threadgroup_size [[threads_per_threadgroup]])
@@ -296,7 +296,7 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
 
     Node curNode = nodeData.nodes[nodeIndex];
     int start = curNode.start, end = curNode.end;
-    half2 topLeft = curNode.topLeft, bottomRight = curNode.bottomRight;
+    float2 topLeft = curNode.topLeft, bottomRight = curNode.bottomRight;
 
     if (start == -1 || end == -1)
         return;
@@ -369,27 +369,27 @@ COMPUTE FORCE
 ----------------------------------------------------------------------------------------
 */
 
-inline float getDistance(half2 pos1, half2 pos2) {
-    half2 delta = pos1 - pos2;
-    half2 deltaSquared = pow(delta, 2);
+inline float getDistance(float2 pos1, float2 pos2) {
+    float2 delta = pos1 - pos2;
+    float2 deltaSquared = pow(delta, 2);
     return sqrt(deltaSquared.x + deltaSquared.y);
 }
 
 
-inline bool isCollide(Body b1, half2 cm) {
+inline bool isCollide(Body b1, float2 cm) {
     return b1.radius * 2 + COLLISION_TH > getDistance(b1.position, cm);
 }
 
 
-inline void computeForce(constant const NodeData &nodeData,
-                  device BodyData &bodyData,
-                  thread Body& bi,
-                  int nodeIndex,
-                  int bodyIndex,
-                  int leafLimit,
-                  float width)
+inline void computeForce( constant const NodeData &nodeData,
+                          device BodyData &bodyData,
+                          thread Body& bi,
+                          int nodeIndex,
+                          int bodyIndex,
+                          int leafLimit,
+                          float width)
 {
-    int stack[32];
+    uint stack[32];
     float widthStack[32];
     int stackIdx = 0;
     
@@ -399,7 +399,7 @@ inline void computeForce(constant const NodeData &nodeData,
         
     while (stackIdx > 0) {
         stackIdx--;
-        int curIndex = stack[stackIdx];
+        uint curIndex = stack[stackIdx];
         float curWidth = widthStack[stackIdx];
         
         if (curIndex >= nodeData.numNodes || curIndex < 0.0h) {
@@ -408,16 +408,16 @@ inline void computeForce(constant const NodeData &nodeData,
         
         Node curNode = nodeData.nodes[curIndex];
 
-        half2 cm = curNode.centerOfMass;
+        float2 cm = curNode.centerOfMass;
 
         if (curNode.isLeaf) {
             if (curNode.centerOfMass.x != -1) {
                 float dist = getDistance(bi.position, cm);
                 if (dist > 0.01h) {
-                    half2 rij = cm - bi.position;
-                    half r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (E * E));
-                    half f = (GRAVITY * bi.mass * curNode.totalMass) / (r * r * r + (E * E));
-                    half2 force = { rij.x * f, rij.y * f };
+                    float2 rij = cm - bi.position;
+                    float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (E * E));
+                    float f = (GRAVITY * bi.mass * curNode.totalMass) / (r * r * r + (E * E));
+                    float2 force = { rij.x * f, rij.y * f };
 
                     bi.acceleration += (force / bi.mass);
                 }
@@ -427,10 +427,10 @@ inline void computeForce(constant const NodeData &nodeData,
 
         float sd = curWidth / getDistance(bi.position, cm);
         if (sd < THETA) {
-            half2 rij = cm - bi.position;
-            half r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (E * E));
-            half f = (GRAVITY * bi.mass * curNode.totalMass) / (r * r * r + (E * E));
-            half2 force = rij * f;
+            float2 rij = cm - bi.position;
+            float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (E * E));
+            float f = (GRAVITY * bi.mass * curNode.totalMass) / (r * r * r + (E * E));
+            float2 force = rij * f;
 
             bi.acceleration += (force / bi.mass);
             continue;
@@ -464,7 +464,7 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
                                         constant uint& numBodies  [[buffer(3)]],
                                         uint tid  [[thread_position_in_grid]],
                                         uint gid  [[thread_index_in_threadgroup]],
-                                        uint threadsPerThreadgroup  [[threads_per_threadgroup]])
+                                        uint threadgroup_size  [[threads_per_threadgroup]])
 {
     if (tid >= numBodies)
         return;
@@ -472,18 +472,17 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
     thread PerBodyConnectionsData perBodyConnectionsData;
     thread uint appendIdx = 0;
     
-    // Initialize all connections to UINT_MAX
     for (uint i = 0; i < MAX_CONNECTIONS; ++i) {
         perBodyConnectionsData.perBodyConnections[i] = UINT_MAX;
     }
     
     threadgroup uint2 connectionsTile[BLOCK_SIZE];
 
-    const uint numConnectionTiles = (numConnections + threadsPerThreadgroup - 1) / threadsPerThreadgroup;
+    const uint numConnectionTiles = (numConnections + threadgroup_size - 1) / threadgroup_size;
 
     for (uint tile = 0; tile < numConnectionTiles; ++tile) {
 
-        uint idx = tile * threadsPerThreadgroup + gid;
+        uint idx = tile * threadgroup_size + gid;
         if (idx < numConnections) {
             connectionsTile[gid] = connections[idx];
         } else {
@@ -492,8 +491,8 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
-        for (uint b = 0; b < threadsPerThreadgroup; ++b) {
-            uint j = tile * threadsPerThreadgroup + b;
+        for (uint b = 0; b < threadgroup_size; ++b) {
+            uint j = tile * threadgroup_size + b;
             if (j >= numConnections)
                 break;
 
@@ -514,40 +513,34 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
     connectionsData.connections[tid] = perBodyConnectionsData;
 }
 
-/*
-void computeConnectionForces(device const BodyData& bodyData,
-                             device const uint2* __restrict__ connections,
-                             constant uint& numConnections,
-                             thread Body& bi,
-                             threadgroup Body* __restrict__ tileB [[threadgroup(0)]],
-                             uint tid                 [[thread_index_in_threadgroup]],
-                             uint bid            [[threadgroup_position_in_grid]],
-                             uint gid                 [[thread_position_in_grid]],
-                             uint threadgroup_size   [[threads_per_threadgroup]])
+
+inline void computeConnectionsForce( device BodyData& bodyData,
+                                     thread Body& bi,
+                                     threadgroup Body* __restrict__ tileBlock,
+                                     uint tid                 [[thread_index_in_threadgroup]],
+                                     uint gid                 [[thread_position_in_grid]],
+                                     uint threadgroup_size   [[threads_per_threadgroup]])
 {
 
-    if (tid > numConnections) {
+    if (gid >= bodyData.numBodies) {
         return;
     }
-    
-    if (connections[tid].x > bodyData.numBodies || connections[tid].y > bodyData.numBodies ) {
-        return;
-    }
-    
+
+    float2 force = { 0.0f, 0.0f };
+
     const uint numTiles = (bodyData.numBodies + threadgroup_size - 1) / threadgroup_size;
-    
+
     for (uint tile = 0; tile < numTiles; ++tile) {
 
         uint idx = tile * threadgroup_size + tid;
-        
-        if (idx < bodyData.) {
-            tileB[tid] = bodyData.bodies[idx];
+        if (idx < bodyData.numBodies) {
+            tileBlock[tid] = bodyData.bodies[idx];
         } else {
-            tileB[tid].position = 0.0h;
-            tileB[tid].mass = 0.0f;
-            tileB[tid].radius = 0.0f;
-            tileB[tid].isDynamic = 0;
-            tileB[tid].velocity = 0.0h;
+            tileBlock[tid].position = { 0.0f, 0.0f };
+            tileBlock[tid].mass = 0.0f;
+            tileBlock[tid].radius = 0.0f;
+            tileBlock[tid].isDynamic = false;
+            tileBlock[tid].velocity = { 0.0f, 0.0f };
         }
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -555,22 +548,19 @@ void computeConnectionForces(device const BodyData& bodyData,
         uint maxB = threadgroup_size;
         for (uint b = 0; b < maxB; ++b) {
             uint j = tile * threadgroup_size + b;
-            if (j >= *nBodies)
+            if (j >= bodyData.numBodies)
                 break;
 
-            Body bj = tileB[b];
+            Body bj = tileBlock[b];
 
-            if (bi.isDynamic != 0) {//}&& !isCollide(bi, bj, COLLISION_TH)) {
-                float rx = bj.position.x - bi.position.x;
-                float ry = bj.position.y - bi.position.y;
-                float r = sqrt((rx*rx + ry*ry) + (E * E));
+            if (bi.isDynamic != 0 && j != gid) {
+                float2 delta = bj.position - bi.position;
+                float distSq = (delta.x * delta.x) + (delta.y * delta.y);
                 
-                float denom = (r * r) + (E * E);
-
-                if (denom > 0.0f) {
-                    float f = (GRAVITY * bi.mass * bj.mass) / denom;
-                    fx += (rx * f) / bi.mass;
-                    fy += (ry * f) / bi.mass;
+                if (distSq > 0.01f) {
+                    float r = sqrt(distSq + (E * E));
+                    float f = (GRAVITY * bi.mass * bj.mass) / (r * r * r);
+                    force += (delta * f) / bi.mass;
                 }
             }
         }
@@ -578,18 +568,21 @@ void computeConnectionForces(device const BodyData& bodyData,
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 
+    bi.acceleration += force;
 }
 
-*/
+kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
+                                device BodyData &bodyData [[buffer(1)]],
+                                constant int &leafLimit [[buffer(2)]],
+                                //constant uint2* __restrict__ connections [[buffer(3)]],
+                                //threadgroup Body* __restrict__ tileBlock [[threadgroup(0)]],
 
-kernel void computeForceKernel(constant const NodeData &nodeData [[buffer(0)]],
-                               device BodyData &bodyData [[buffer(1)]],
-                               constant int &leafLimit [[buffer(2)]],
-                               //constant uint2* __restrict__ connections [[buffer(3)]],
-                               //threadgroup Body* __restrict__ tileB [[threadgroup(0)]],
-
-                               uint gid [[thread_position_in_grid]])
+                                uint tid                [[thread_index_in_threadgroup]],
+                                uint gid                [[thread_position_in_grid]],
+                                uint threadgroup_size   [[threads_per_threadgroup]])
 {
+    
+    threadgroup Body tileBlock[BLOCK_SIZE];// BlockSize is threads per threadgroup
     
     float width = nodeData.nodes[0].bottomRight.x - nodeData.nodes[0].topLeft.x;
     
@@ -598,8 +591,18 @@ kernel void computeForceKernel(constant const NodeData &nodeData [[buffer(0)]],
         if (bi.isDynamic) {
             bi.acceleration = {0.0, 0.0};
             computeForce(nodeData, bodyData, bi, 0, gid, leafLimit, width);
-            
+            computeConnectionsForce(bodyData, bi, tileBlock, tid, gid, threadgroup_size);
+                        
+            bi.velocity *= 0.98f; //damping
             bi.velocity += bi.acceleration * DT;
+            
+            //clamping
+            const float MAX_VELOCITY = 10000.0f;
+            float velMag = sqrt(bi.velocity.x * bi.velocity.x + bi.velocity.y * bi.velocity.y);
+            if (velMag > MAX_VELOCITY) {
+                bi.velocity *= (MAX_VELOCITY / velMag);
+            }
+            
             bi.position += bi.velocity * DT;
         }
         bodyData.bodies[gid] = bi;
