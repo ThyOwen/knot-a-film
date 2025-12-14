@@ -29,13 +29,13 @@ inline bool isCollide(thread const Body &b1,
 
 kernel void directSumTiledKernel(device Body *bodies      [[buffer(0)]],
                                  constant int* nBodies    [[buffer(1)]],
+                                 constant PhysicsParams &physics [[buffer(2)]],
+                                 threadgroup Body* tileB  [[threadgroup(0)]],
                                  uint tid                 [[thread_index_in_threadgroup]],
                                  uint group_id            [[threadgroup_position_in_grid]],
                                  uint gid                 [[thread_position_in_grid]],
                                  uint threadsPerThreadgroup   [[threads_per_threadgroup]])
 {
-    threadgroup Body tileB[BLOCK_SIZE];// BlockSize is threads per threadgroup
-
     if (gid >= *nBodies) {
         return;
     }
@@ -75,15 +75,15 @@ kernel void directSumTiledKernel(device Body *bodies      [[buffer(0)]],
 
             Body bj = tileB[b];
 
-            if (bi.isDynamic != 0) {//}&& !isCollide(bi, bj, COLLISION_TH)) {
+            if (bi.isDynamic != 0) {
                 float rx = bj.position.x - bi.position.x;
                 float ry = bj.position.y - bi.position.y;
-                float r = sqrt((rx*rx + ry*ry) + (E * E));
+                float r = sqrt((rx*rx + ry*ry) + (physics.epsilon * physics.epsilon));
                 
-                float denom = (r * r) + (E * E);
+                float denom = (r * r) + (physics.epsilon * physics.epsilon);
 
                 if (denom > 0.0f) {
-                    float f = (GRAVITY * bi.mass * bj.mass) / denom;
+                    float f = (physics.gravity * bi.mass * bj.mass) / denom;
                     fx += (rx * f) / bi.mass;
                     fy += (ry * f) / bi.mass;
                 }
@@ -96,11 +96,11 @@ kernel void directSumTiledKernel(device Body *bodies      [[buffer(0)]],
     bi.acceleration.x += fx;
     bi.acceleration.y += fy;
 
-    bi.velocity.x -= bi.acceleration.x * DT;
-    bi.velocity.y -= bi.acceleration.y * DT;
+    bi.velocity.x -= bi.acceleration.x * physics.dt;
+    bi.velocity.y -= bi.acceleration.y * physics.dt;
 
-    bi.position.x += bi.velocity.x * DT;
-    bi.position.y += bi.velocity.y * DT;
+    bi.position.x += bi.velocity.x * physics.dt;
+    bi.position.y += bi.velocity.y * physics.dt;
 
     // write back
     bodies[gid] = bi;

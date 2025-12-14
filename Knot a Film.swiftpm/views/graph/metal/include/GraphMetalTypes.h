@@ -5,33 +5,18 @@
     #import <Foundation/Foundation.h>
 #endif
 
-// Constants
 #define MAX_CONNECTIONS 512
-#define NUM_BODIES 1024
-#define WINDOW_WIDTH 2048
-#define WINDOW_HEIGHT 2048
-#define NBODY_WIDTH 2.0
-#define NBODY_HEIGHT 2.0
-#define GRAVITY 0.0001
-#define E 0.01
-#define DT 0.016
-#define THETA 0.5
-#define CENTERX 0
-#define CENTERY 0
-#define BLOCK_SIZE 512
-#define GRID_SIZE 512
-#define MAX_N 4194304
+#define NUM_BODIES 4096
 #define MAX_NODES 349525
-#define MAX_DEPTH 9
-#define N_LEAF 262144
-#define COLLISION_TH 0.0
-#define MIN_DIST 0.3
-#define MAX_DIST 0.8
-#define SUN_MASS 10.0
-#define SUN_DIA 0.05
-#define EARTH_MASS 1.0
-#define EARTH_DIA 0.01
-#define HBL 1.6e29
+
+struct PhysicsParams {
+    float gravity;
+    float epsilon;
+    float dt;
+    float theta;
+    float collisionThreshold;
+    float damping;
+};
 
 struct Node {
     simd_float2 topLeft;

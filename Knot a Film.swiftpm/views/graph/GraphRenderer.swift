@@ -12,14 +12,38 @@ public struct GraphParams {
     
     let edgeRepulsion : Double = 0.10
     let edgeAttraction : Double = 0.1
-    let damping : Double = 0.001
-    let epsilon : Double = 1e-03
+    
+    // Tree construction parameters
+    let maxDepth: Int32 = 9
+    static let nLeaf: Int32 = 262144
     
     var numBodies : Int32 = NUM_BODIES
     var numNodes : Int32 = MAX_NODES
-    var leafLimit : Int32 = MAX_NODES - N_LEAF
-    let maxDepth: Int32 = MAX_DEPTH
+    var leafLimit : Int32 = MAX_NODES - nLeaf
     var maxConnections : Int32 = MAX_CONNECTIONS
+    
+    let minDist : Float = 0.3
+    let maxDist : Float = 0.8
+    
+    let centerX : Float = 0.0
+    let centerY : Float = 0.0
+    
+    let sunMass : Float = 10.0
+    let sunDiameter : Float = 0.05
+    let earthMass : Float = 1.0
+    let earthDiameter : Float = 0.01
+    
+    let blockSize : Int32 = 512
+
+    var physics = PhysicsParams(
+        gravity: 0.0001,
+        epsilon: 0.01,
+        dt: 0.016,
+        theta: 0.5,
+        collisionThreshold: 0.0,
+        damping: 0.98
+    )
+    
 }
 
 
@@ -109,8 +133,14 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
         computeEncoder.setComputePipelineState(self.forcePSO)
         computeEncoder.setBuffer(self.bodiesBuffer, offset: 0, index: 0)
         computeEncoder.setBytes(&self.params.numBodies, length: MemoryLayout<Int32>.size, index: 1)
+        
+        computeEncoder.setBytes(&self.params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 2)
+        
+        // Set threadgroup memory for tileB array
+        let tileBlockMemSize = MemoryLayout<Body>.stride * Int(self.params.blockSize)
+        computeEncoder.setThreadgroupMemoryLength(tileBlockMemSize, index: 0)
     
-        let threadsPerThreadgroup = MTLSize(width: 128, height: 1, depth: 1)
+        let threadsPerThreadgroup = MTLSize(width: Int(self.params.blockSize), height: 1, depth: 1)
         let threadsPerGrid = MTLSize(width: Int(self.params.numBodies), height: 1, depth: 1)
         
         computeEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
@@ -152,11 +182,11 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
     }
 
     static public func initRandomBodies(params : borrowing GraphParams) -> [Body] {
-        let maxDistance = Float32(MAX_DIST)
-        let minDistance = Float32(MIN_DIST)
+        let maxDistance = params.maxDist
+        let minDistance = params.minDist
         let numBodies = Int(params.numBodies)
         
-        let centerPos = SIMD2<Float32>(x: Float32(CENTERX), y: Float32(CENTERY))
+        let centerPos = SIMD2<Float32>(x: params.centerX, y: params.centerY)
 
         var bodies : [Body] = .init(repeating: Body(), count: numBodies)
         
@@ -170,8 +200,8 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
             
             let body : Body = .init(
                 isDynamic: true,
-                mass: 1,//Float(EARTH_MASS),
-                radius: 1,//Float(EARTH_DIA),
+                mass: params.earthMass,
+                radius: params.earthDiameter,
                 position: position,
                 velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
                 acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
@@ -181,8 +211,8 @@ public final class GraphRendererDirectSum : NSObject, MTKViewDelegate {
 
         let body : Body = .init(
             isDynamic: false,
-            mass: Float(SUN_MASS),
-            radius: Float(SUN_DIA),
+            mass: params.sunMass,
+            radius: params.sunDiameter,
             position: centerPos,
             velocity: SIMD2<Float32>(x: 0.0, y: 0.0),
             acceleration: SIMD2<Float32>(x: 0.0, y: 0.0)
@@ -225,7 +255,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
     public var screenTransform : ScreenTransform = .init(offset: .zero, zoom: .init(1.0, 1.0))
 
-    private let threadgroupSize = MTLSize(width: 512, height: 1, depth: 1)
+    private let threadgroupSize = MTLSize(width: 256, height: 1, depth: 1)
     
     public init(connections : [SIMD2<UInt32>]) {
 
@@ -247,7 +277,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         //Bodies
         let bodyDataPtr = bodyBuffer.contents().bindMemory(to: BodyData.self, capacity: 1)
         withUnsafeMutablePointer(to: &bodyDataPtr.pointee.bodies.0) { bodiesPtr in
-            for (i, body) in bodies.enumerated() where i < Int(NUM_BODIES) {
+            for (i, body) in bodies.enumerated() where i < Int(params.numBodies) {
                 bodiesPtr.advanced(by: i).pointee = body
             }
         }
@@ -255,7 +285,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         let bodyDataAltPtr = bodyBufferAlt.contents().bindMemory(to: BodyData.self, capacity: 1)
         withUnsafeMutablePointer(to: &bodyDataAltPtr.pointee.bodies.0) { bodiesPtr in
-            for (i, body) in bodies.enumerated() where i < Int(NUM_BODIES) {
+            for (i, body) in bodies.enumerated() where i < Int(params.numBodies) {
                 bodiesPtr.advanced(by: i).pointee = body
             }
         }
@@ -271,8 +301,12 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let coalescedIndicesSize = MemoryLayout<ConnectionsData>.stride
         self.coalescedIndicesBuffer = device.makeBuffer(length: coalescedIndicesSize, options: .storageModeShared)!
         
-        let connectionsBufferSize = connections.count * MemoryLayout<SIMD2<UInt32>>.stride
-        self.connectionsBuffer = device.makeBuffer(bytes: consume connections, length: connectionsBufferSize, options: .storageModeShared)!
+        if connections.isEmpty {
+            self.connectionsBuffer = device.makeBuffer(length: MemoryLayout<SIMD2<UInt32>>.stride, options: .storageModeShared)!
+        } else {
+            let connectionsBufferSize = connections.count * MemoryLayout<SIMD2<UInt32>>.stride
+            self.connectionsBuffer = device.makeBuffer(bytes: consume connections, length: connectionsBufferSize, options: .storageModeShared)!
+        }
 
         //Helpers
         let mutexSize = MemoryLayout<Int32>.stride * Int(params.numNodes)
@@ -333,6 +367,10 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         var numConns = Int32(self.numConnections)
         encoder.setBytes(&numConns, length: MemoryLayout<Int32>.stride, index: 2)
         encoder.setBytes(&params.numBodies, length: MemoryLayout<Int32>.stride, index: 3)
+        
+        // Set threadgroup memory for connectionsTile array
+        let connectionsTileMemSize = MemoryLayout<SIMD2<UInt32>>.stride * Int(params.blockSize)
+        encoder.setThreadgroupMemoryLength(connectionsTileMemSize, index: 0)
 
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                               height: 1, depth: 1)
@@ -421,8 +459,15 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         encoder.setComputePipelineState(computeForcePipeline)
         encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
-        encoder.setBuffer(bodyBuffer, offset: 0, index: 1)
-        encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 2)
+        encoder.setBuffer(coalescedIndicesBuffer, offset: 0, index: 1)
+        encoder.setBuffer(bodyBuffer, offset: 0, index: 2)
+        encoder.setBytes(&params.leafLimit, length: MemoryLayout<Int32>.stride, index: 3)
+        
+        encoder.setBytes(&self.params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 4)
+        
+        // Set threadgroup memory for tileBlock array
+        let tileBlockMemSize = MemoryLayout<Body>.stride * Int(params.blockSize)
+        encoder.setThreadgroupMemoryLength(tileBlockMemSize, index: 0)
         
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                               height: 1, depth: 1)

@@ -7,7 +7,7 @@
 
 import Foundation
 import MetalPerformanceShadersGraph
-
+/*
 extension Graph {
     
     static func formatValue<T: Numeric>(_ value: T) -> String {
@@ -53,7 +53,7 @@ extension Graph {
     }
     
 }
-
+*/
 extension GraphRenderer {
     static func buildStructuredPositions<N: FloatingPoint & SIMDScalar>(
         numNodes: Int,
