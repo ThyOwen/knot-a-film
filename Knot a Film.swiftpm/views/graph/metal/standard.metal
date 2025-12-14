@@ -34,7 +34,7 @@ kernel void directSumTiledKernel(device Body *bodies      [[buffer(0)]],
                                  uint gid                 [[thread_position_in_grid]],
                                  uint threadsPerThreadgroup   [[threads_per_threadgroup]])
 {
-    threadgroup Body tileB[BLOCK_SIZE];
+    threadgroup Body tileB[BLOCK_SIZE];// BlockSize is threads per threadgroup
 
     if (gid >= *nBodies) {
         return;

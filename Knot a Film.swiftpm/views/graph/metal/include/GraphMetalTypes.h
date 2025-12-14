@@ -6,6 +6,7 @@
 #endif
 
 // Constants
+#define MAX_CONNECTIONS 512
 #define NUM_BODIES 1024
 #define WINDOW_WIDTH 2048
 #define WINDOW_HEIGHT 2048
@@ -63,3 +64,12 @@ struct BodyData {
     int numBodies;
 };
 
+struct PerBodyConnectionsData {
+    uint perBodyConnections[MAX_CONNECTIONS];
+    int numConnections;
+};
+
+struct ConnectionsData {
+    struct PerBodyConnectionsData connections[NUM_BODIES];
+    int numBodiesWithConnections;
+};
