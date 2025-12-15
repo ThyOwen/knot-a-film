@@ -6,7 +6,7 @@
 #endif
 
 #define MAX_CONNECTIONS 512
-#define NUM_BODIES 4096
+#define NUM_BODIES 100000
 #define MAX_NODES 349525
 
 struct ScreenTransform {

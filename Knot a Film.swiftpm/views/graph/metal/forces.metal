@@ -12,6 +12,47 @@
 
 using namespace metal;
 
+
+kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
+                              constant PhysicsParams& params [[buffer(1)]],
+                              uint gid [[thread_position_in_grid]])
+{
+    if (gid >= bodyData.numBodies) return;
+
+    float maxDistance = 0.8f;
+    float minDistance = 0.3f;
+    float2 centerPos = float2(0.0f, 0.0f);
+
+    if (gid == bodyData.numBodies - 1) {
+        Body sun;
+        sun.isDynamic = false;
+        sun.mass = 1;
+        sun.radius = 1;
+        sun.position = centerPos;
+        sun.velocity = float2(0.0f, 0.0f);
+        sun.acceleration = float2(0.0f, 0.0f);
+        bodyData.bodies[gid] = sun;
+        return;
+    }
+
+    float angle = 2.0f * M_PI_F * (float(gid) / (float)(bodyData.numBodies - 1));
+    float radius = (maxDistance - minDistance) * (fract(sin(float(gid) * 12.9898f) * 43758.5453f)) + minDistance;
+
+    float x = centerPos.x + radius * cos(angle);
+    float y = centerPos.y + radius * sin(angle);
+    float2 position = float2(x, y);
+
+    Body earth;
+    earth.isDynamic = true;
+    earth.mass = 1;
+    earth.radius = 1;
+    earth.position = position;
+    earth.velocity = float2(0.0f, 0.0f);
+    earth.acceleration = float2(0.0f, 0.0f);
+    bodyData.bodies[gid] = earth;
+    
+}
+
 /*
 ----------------------------------------------------------------------------------------
 RESET KERNEL

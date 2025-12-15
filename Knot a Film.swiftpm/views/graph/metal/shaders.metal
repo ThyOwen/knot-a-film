@@ -6,8 +6,8 @@
 //
 
 #include <metal_stdlib>
-
 #include "include/GraphMetalTypes.h"
+
 using namespace metal;
 
 struct VertexOut {
