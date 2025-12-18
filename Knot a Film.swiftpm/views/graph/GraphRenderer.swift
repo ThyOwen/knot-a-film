@@ -27,11 +27,6 @@ public struct GraphParams {
     let centerX : Float = 0.0
     let centerY : Float = 0.0
     
-    let sunMass : Float = 10.0
-    let sunDiameter : Float = 0.05
-    let earthMass : Float = 1.0
-    let earthDiameter : Float = 0.01
-    
     let blockSize : Int32 = 512
 
     var physics = PhysicsParams(
@@ -39,8 +34,8 @@ public struct GraphParams {
         epsilon: 0.01,
         dt: 0.016,
         theta: 0.5,
-        collisionThreshold: 0.0,
-        damping: 0.98
+        collisionThreshold: 0.001,
+        damping: 0.95
     )
     
 }
@@ -129,19 +124,23 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         //render
         //let vertexDescriptor = GraphRendererDirectSum.makeBodyVertexDescriptor()
         
-        let bodyPipelineDescriptor = MTLRenderPipelineDescriptor()
-        bodyPipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexBody")
-        bodyPipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentBody")
-        bodyPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        
         let nodePipelineDescriptor = MTLRenderPipelineDescriptor()
         nodePipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexNode")
         nodePipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentNode")
         nodePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         
+        
+        let bodyPipelineDescriptor = MTLMeshRenderPipelineDescriptor()
+        bodyPipelineDescriptor.meshFunction = library.makeFunction(name: "meshShader")
+        bodyPipelineDescriptor.objectFunction = library.makeFunction(name: "objectShader")
+        bodyPipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentBody")
+        bodyPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        
         self.nodeRenderPipeline = try! device.makeRenderPipelineState(descriptor: nodePipelineDescriptor)
-        self.bodyRenderPipeline = try! device.makeRenderPipelineState(descriptor: bodyPipelineDescriptor)
-
+        
+        let pipelineOption : MTLPipelineOption = .failOnBinaryArchiveMiss
+        let (bodyRenderPipeline, _) = try! device.makeRenderPipelineState(descriptor: bodyPipelineDescriptor, options: pipelineOption)
+        self.bodyRenderPipeline = bodyRenderPipeline
         //compute
         
         let initalizeBodiesFunction = library.makeFunction(name: "initalizeBodies")!
@@ -266,7 +265,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
             let countMemSize = MemoryLayout<Int32>.stride * 8
             let massMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
-            let centerMemSize = MemoryLayout<SIMD2<Float32>>.stride * threadgroupSize.width
+            let centerMemSize = MemoryLayout<SIMD2<Float16>>.stride * threadgroupSize.width
             encoder.setThreadgroupMemoryLength(countMemSize, index: 0)
             encoder.setThreadgroupMemoryLength(massMemSize, index: 1)
             encoder.setThreadgroupMemoryLength(centerMemSize, index: 2)
@@ -295,7 +294,6 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         encoder.setBytes(&self.params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 4)
         
-        // Set threadgroup memory for tileBlock array
         let tileBlockMemSize = MemoryLayout<Body>.stride * Int(params.blockSize)
         encoder.setThreadgroupMemoryLength(tileBlockMemSize, index: 0)
         
@@ -344,8 +342,12 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         // draw bodies 
         renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
-        renderEncoder.setVertexBuffer(self.bodyBuffer, offset: 0, index: 0)
-        renderEncoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: Int(self.params.numBodies))
+        renderEncoder.setObjectBuffer(self.bodyBuffer, offset: 0, index: 0)
+        renderEncoder.setObjectBuffer(self.transformBuffer, offset: 0, index: 1)
+
+        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
+        let oneThread = MTLSize(width: 1, height: 1, depth: 1)
+        renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: oneThread, threadsPerMeshThreadgroup: oneThread)  
     
         renderEncoder.endEncoding()
         commandBuffer.present(drawable)

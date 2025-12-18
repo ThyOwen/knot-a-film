@@ -21,35 +21,22 @@ kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
 
     float maxDistance = 0.8f;
     float minDistance = 0.3f;
-    float2 centerPos = float2(0.0f, 0.0f);
-
-    if (gid == bodyData.numBodies - 1) {
-        Body sun;
-        sun.isDynamic = false;
-        sun.mass = 1;
-        sun.radius = 1;
-        sun.position = centerPos;
-        sun.velocity = float2(0.0f, 0.0f);
-        sun.acceleration = float2(0.0f, 0.0f);
-        bodyData.bodies[gid] = sun;
-        return;
-    }
+    half2 centerPos = { 0.0h, 0.0h };
 
     float angle = 2.0f * M_PI_F * (float(gid) / (float)(bodyData.numBodies - 1));
     float radius = (maxDistance - minDistance) * (fract(sin(float(gid) * 12.9898f) * 43758.5453f)) + minDistance;
 
     float x = centerPos.x + radius * cos(angle);
     float y = centerPos.y + radius * sin(angle);
-    float2 position = float2(x, y);
+    float2 position = { x, y };
 
-    Body earth;
-    earth.isDynamic = true;
-    earth.mass = 1;
-    earth.radius = 1;
-    earth.position = position;
-    earth.velocity = float2(0.0f, 0.0f);
-    earth.acceleration = float2(0.0f, 0.0f);
-    bodyData.bodies[gid] = earth;
+    Body body;
+    body.mass = 1.0f;
+    body.radius = 0.001f;
+    body.position = position;
+    body.velocity = { 0.0h, 0.0h };
+    body.acceleration = { 0.0h, 0.0h };
+    bodyData.bodies[gid] = body;
     
 }
 
@@ -67,7 +54,7 @@ kernel void resetKernel(device NodeData &nodeData [[buffer(0)]],
     if (gid < uint(nodeData.numNodes)) {
         nodeData.nodes[gid].topLeft = {INFINITY, -INFINITY};
         nodeData.nodes[gid].bottomRight = {-INFINITY, INFINITY};
-        nodeData.nodes[gid].centerOfMass = {-1, -1};
+        nodeData.nodes[gid].centerOfMass = {-1.0h, -1.0h};
         nodeData.nodes[gid].totalMass = 0.0;
         nodeData.nodes[gid].isLeaf = true;
         nodeData.nodes[gid].start = -1;
@@ -115,8 +102,7 @@ kernel void computeBoundingBoxKernel(device NodeData &nodeData [[buffer(0)]],
 
     for (uint s = threadgroup_size / 2; s > 0; s >>= 1) {
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (tid < s)
-        {
+        if (tid < s) {
             topLeftX[tid] = fmin(topLeftX[tid], topLeftX[tid + s]);
             topLeftY[tid] = fmax(topLeftY[tid], topLeftY[tid + s]);
             bottomRightX[tid] = fmax(bottomRightX[tid], bottomRightX[tid + s]);
@@ -226,7 +212,7 @@ inline void computeCenterOfMass(thread Node &curNode,
     int sz = (total + threadgroup_size - 1) / threadgroup_size;
     int s = tid * sz + start;
     float M = 0.0;
-    float2 R = { 0.0, 0.0 };
+    float2 R = { 0.0f, 0.0f };
 
     for (int i = s; i < s + sz; ++i) {
         if (i <= end) {
@@ -254,8 +240,7 @@ inline void computeCenterOfMass(thread Node &curNode,
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (tid == 0) {
-        centerOfMass[0].x /= totalMass[0];
-        centerOfMass[0].y /= totalMass[0];
+        centerOfMass[0] /= totalMass[0];
         curNode.totalMass = totalMass[0];
         curNode.centerOfMass = centerOfMass[0];
     }
@@ -409,16 +394,16 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
 COMPUTE FORCE
 ----------------------------------------------------------------------------------------
 */
-
-inline float getDistance(float2 pos1, float2 pos2) {
-    float2 delta = pos1 - pos2;
-    float2 deltaSquared = pow(delta, 2);
+template<typename N>
+inline float getDistance(N pos1, N pos2) {
+    N delta = pos1 - pos2;
+    N deltaSquared = pow(delta, 2);
     return sqrt(deltaSquared.x + deltaSquared.y);
 }
 
 
 inline bool isCollide(Body b1, float2 cm, float collisionThreshold) {
-    return b1.radius * 2 + collisionThreshold > getDistance(b1.position, cm);
+    return (b1.radius * 2 + collisionThreshold) > getDistance(b1.position, cm);
 }
 
 
@@ -450,13 +435,11 @@ inline void computeForce( constant const NodeData &nodeData,
         
         Node curNode = nodeData.nodes[curIndex];
 
-        float2 cm = curNode.centerOfMass;
-
         if (curNode.isLeaf) {
-            if (curNode.centerOfMass.x != -1) {
-                float dist = getDistance(bi.position, cm);
-                if (dist > 0.01h) {
-                    float2 rij = cm - bi.position;
+            if (curNode.centerOfMass.x != -1 && !isCollide(bi, curNode.centerOfMass, physics.collisionThreshold)) {
+                float dist = getDistance(bi.position, curNode.centerOfMass);
+                if (dist > 0.01f) {
+                    float2 rij = curNode.centerOfMass - bi.position;
                     float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (physics.epsilon * physics.epsilon));
                     float f = (physics.gravity * bi.mass * curNode.totalMass) / (r * r + (physics.epsilon * physics.epsilon));
                     float2 force = { rij.x * f, rij.y * f };
@@ -467,18 +450,21 @@ inline void computeForce( constant const NodeData &nodeData,
             continue;
         }
 
-        float sd = curWidth / getDistance(bi.position, cm);
+        float sd = curWidth / getDistance(bi.position, curNode.centerOfMass);
         if (sd < physics.theta) {
-            float2 rij = cm - bi.position;
-            float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (physics.epsilon * physics.epsilon));
-            float f = (physics.gravity * bi.mass * curNode.totalMass) / (r * r * r + (physics.epsilon * physics.epsilon));
-            float2 force = rij * f;
-
-            bi.acceleration -= (force / bi.mass);
+            if (!isCollide(bi, curNode.centerOfMass, physics.collisionThreshold)) {
+                
+                float2 rij = curNode.centerOfMass - bi.position;
+                float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (physics.epsilon * physics.epsilon));
+                float f = (physics.gravity * bi.mass * curNode.totalMass) / (r * r * r + (physics.epsilon * physics.epsilon));
+                float2 force = rij * f;
+                
+                bi.acceleration -= (force / bi.mass);
+            }
             continue;
         }
 
-        float halfWidth = curWidth / 2.0h;
+        float halfWidth = curWidth / 2.0f;
         if (stackIdx + 4 <= 32) {
             stack[stackIdx] = (curIndex * 4) + 4;
             widthStack[stackIdx] = halfWidth;
@@ -570,7 +556,7 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
         return;
     }
 
-    float2 force = { 0.0f, 0.0f };
+    float2 force = { 0.0h, 0.0h };
 
     const uint numTiles = (bConnections.numConnections + threadgroup_size - 1) / threadgroup_size;
 
@@ -579,11 +565,10 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
 
         uint connectionIdx = UINT_MAX;
         thread Body body;
-        body.position = { 0.0f, 0.0f };
+        body.position = { 0.0h, 0.0h };
         body.mass = 0.0f;
         body.radius = 0.0f;
-        body.isDynamic = false;
-        body.velocity = { 0.0f, 0.0f };
+        body.velocity = { 0.0h, 0.0h };
         
         if (idx < bConnections.numConnections) {
             connectionIdx = bConnections.perBodyConnections[idx];
@@ -605,10 +590,10 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
             uint otherBodyIdx = bConnections.perBodyConnections[connectionGlobalIdx];
             
             if (otherBodyIdx != UINT_MAX && otherBodyIdx != gid && bodyj.mass > 0.0f) { // Skip invalid connections, self-interactions, and zero-mass bodies
-                float2 delta = float2(bodyj.position - bi.position);
+                float2 delta = bodyj.position - bi.position;
                 float distSq = (delta.x * delta.x) + (delta.y * delta.y);
                 
-                if (distSq > 0.0001f) {
+                if (distSq > 0.01h) {
                     float r = sqrt(distSq + (physics.epsilon * physics.epsilon));
                     float f = (physics.gravity * bi.mass * bodyj.mass) / (r * r);
                     force += (delta * f) / bi.mass;
@@ -640,23 +625,22 @@ kernel void computeForceKernel( constant NodeData &nodeData [[buffer(0)]],
         thread Body bi = bodyData.bodies[gid];
         thread PerBodyConnectionsData bConnections = connectionsData.connections[gid];
         
-        if (bi.isDynamic) {
-            bi.acceleration = {0.0, 0.0};
-            computeForce(nodeData, bodyData, bi, 0, gid, leafLimit, width, physics);
-            computeConnectionsForce(bodyData, bi, bConnections, tileBlock, connectionsData.numBodiesWithConnections, physics, tid, gid, threadgroup_size);
-                        
-            bi.velocity *= physics.damping;
-            bi.velocity += bi.acceleration * physics.dt;
-            
-            //clamping
-            const float MAX_VELOCITY = 100.0f;
-            float velMag = sqrt(bi.velocity.x * bi.velocity.x + bi.velocity.y * bi.velocity.y);
-            if (velMag > MAX_VELOCITY) {
-                bi.velocity *= (MAX_VELOCITY / velMag);
-            }
-            
-            bi.position += bi.velocity * physics.dt;
+        bi.acceleration = { 0.0h, 0.0h };
+        computeForce(nodeData, bodyData, bi, 0, gid, leafLimit, width, physics);
+        computeConnectionsForce(bodyData, bi, bConnections, tileBlock, connectionsData.numBodiesWithConnections, physics, tid, gid, threadgroup_size);
+                    
+        bi.velocity *= physics.damping;
+        bi.velocity += bi.acceleration * physics.dt;
+        
+        //clamping
+        const float MAX_VELOCITY = 100000.0f;
+        float2 velocitySquared = pow(bi.velocity, 2);
+        float velMag = sqrt(velocitySquared.x + velocitySquared.y);
+        if (velMag > MAX_VELOCITY) {
+            bi.velocity *= (MAX_VELOCITY / velMag);
         }
+        
+        bi.position += bi.velocity * physics.dt;
         bodyData.bodies[gid] = bi;
     }
 }

@@ -48,32 +48,6 @@ vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
     return out;
 }
 
-vertex VertexOut vertexBody(device const BodyData& bodyData [[ buffer(0)]],
-                            constant ScreenTransform& transform [[buffer(1)]],
-                            uint vertexId [[ vertex_id ]]) {
-    Body body = bodyData.bodies[vertexId];
-    VertexOut out;
-    
-    float2 position = (float2(body.position) * transform.scale) + transform.offset;
-    
-    out.position = float4(position, 0.0, 1.0);
-    out.pointSize = 2.0;   // 12x12 pixels per point
-    return out;
-}
-
 fragment float4 fragmentNode(float2 pointCoord [[point_coord]]) {
     return float4(0.8, 0.2, 0.2, 1.0);
 }
-
-fragment float4 fragmentBody(float2 pointCoord [[point_coord]]) {
-    float2 centered = pointCoord * 2.0 - 1.0;
-    float dist = length(centered);
-
-    if (dist > 1.0) {
-        discard_fragment(); // outside circle
-    }
-
-    return float4(1.0, 0.2, 0.2, 1.0);
-}
-
-

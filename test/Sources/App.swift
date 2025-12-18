@@ -7,7 +7,8 @@ import CoreML
     var body: some Scene {
         WindowGroup {
             //MetalView()
-            NBodyView()
+            //NBodyView()
+            SDFView()
             
         }
     }

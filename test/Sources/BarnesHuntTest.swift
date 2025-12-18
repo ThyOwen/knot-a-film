@@ -9,7 +9,6 @@ import SwiftUI
 import Observation
 import Foundation
 
-// Represents a 2D particle
 struct Particle {
     var positionX: Double
     var positionY: Double
@@ -17,7 +16,6 @@ struct Particle {
     var velocityY: Double
 }
 
-// Represents a square region of space
 struct Region {
     var centerX: Double
     var centerY: Double
@@ -29,7 +27,6 @@ struct Region {
     }
 }
 
-// Quadtree node
 class QuadTreeNode {
     var region: Region
     var particle: Particle?          // single particle if leaf
@@ -46,7 +43,6 @@ class QuadTreeNode {
         self.region = region
     }
     
-    // Insert a particle into this node
     func insert(_ newParticle: Particle) {
         // Update center of mass
         centerOfMassX = (centerOfMassX * Double(particleCount) + newParticle.positionX) / Double(particleCount + 1)
@@ -99,9 +95,7 @@ class QuadTreeNode {
         }
     }
     
-    // Compute force on a particle using Barnes-Hut approximation
     func computeForce(on p: Particle, theta: Double = 0.5) -> (fx: Double, fy: Double) {
-        // If empty
         if particleCount == 0 { return (0,0) }
         
         // Distance from particle to this node's center of mass

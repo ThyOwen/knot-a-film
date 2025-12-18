@@ -35,7 +35,6 @@ struct Node {
 };
 
 struct Body {
-    bool isDynamic;
     float mass;
     float radius;
     simd_float2 position;

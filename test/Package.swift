@@ -12,7 +12,8 @@ let package = Package(
         .executableTarget(
             name: "MetalTest",
             resources: [
-                .process("shaders.metal")
+                .process("shaders.metal"),
+                .process("sdf.metal")
             ]
         ),
     ]
