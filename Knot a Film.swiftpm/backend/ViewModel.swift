@@ -40,7 +40,7 @@ public enum ViewModelError : Error {
                 
                 let searchEngine = try await SearchEngine.create(with: databaseActor)
                 let recommendationEngine = try await RecomendationEngine.create(with: databaseActor)
-                let graphManager = try await GraphManager.create(with: databaseActor, using: #Predicate<Movie> { $0.dateWatched != nil })
+                let graphManager = try await GraphManager.create(with: databaseActor)
                         
                 try await Self.testFetch(on: databaseActor)
                 

@@ -62,13 +62,43 @@ public final actor MovieDatabaseActor {
         }
     }
     
-    public func fetchAndPrepareMovies(_ fetchDescription: FetchDescriptor<Movie>) async throws -> [MovieDTO] {
-        let context = modelExecutor.modelContext
-        let results = try context.fetch(fetchDescription)
-        results.enumerated().forEach { idx, movie in
+    public func fetchAndPrepareMovies() async throws -> ([MovieDTO], [MoviePersonDTO]) {
+        
+        let movieFetch : FetchDescriptor<Movie> = .init(predicate: #Predicate { $0.dateWatched != nil })
+        
+        let movieResults = try modelExecutor.modelContext.fetch(movieFetch)
+        movieResults.enumerated().forEach { idx, movie in
             movie.positionIndex = idx
         }
-        return results.map { MovieDTO(from: $0) }
+        let movies = movieResults.map { MovieDTO(from: $0) }
+        
+        let moviePeopleFetch = FetchDescriptor<MoviePerson>(
+            predicate: #Predicate {
+                $0.directedMovies.contains(where: { $0.dateWatched != nil }) ||
+                $0.actedMovies.contains(where: { $0.dateWatched != nil }) ||
+                $0.writtenMovies.contains(where: { $0.dateWatched != nil })
+            }
+        )
+        
+        let moviePeopleResults = try modelExecutor.modelContext.fetch(moviePeopleFetch)
+        moviePeopleResults.enumerated().forEach { idx, movie in
+            movie.positionIndex = idx
+        }
+        
+        let moviePeople = moviePeopleResults.map { MoviePersonDTO(from: $0) }
+
+        return (movies, moviePeople)
+        
+                
+    }
+    
+    public func fetchAndPrepareMoviePeople(_ fetchDescription: FetchDescriptor<MoviePerson>) async throws -> [MoviePersonDTO] {
+        let context = modelExecutor.modelContext
+        let results = try context.fetch(fetchDescription)
+        results.enumerated().forEach { idx, moviePerson in
+            moviePerson.positionIndex = idx
+        }
+        return results.map { MoviePersonDTO(from: $0) }
     }
     
     public func withFetchResult<N, T : PersistentModel>(_ fetchDescription: consuming FetchDescriptor<T>, _ closure: (consuming [T], isolated MovieDatabaseActor) async throws -> N) async throws -> N {

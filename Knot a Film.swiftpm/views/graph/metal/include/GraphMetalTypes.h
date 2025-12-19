@@ -6,7 +6,7 @@
 #endif
 
 #define MAX_CONNECTIONS 512
-#define NUM_BODIES 100000
+#define MAX_BODIES 1024
 #define MAX_NODES 349525
 
 struct ScreenTransform {
@@ -15,7 +15,9 @@ struct ScreenTransform {
 };
 
 struct PhysicsParams {
-    float gravity;
+    float springConstant;
+    float edgeRepulsion;
+    float edgeAttraction;
     float epsilon;
     float dt;
     float theta;
@@ -49,16 +51,16 @@ struct NodeData {
 };
 
 struct BodyData {
-    struct Body bodies[NUM_BODIES];
+    struct Body bodies[MAX_BODIES];
     uint numBodies;
 };
 
 struct PerBodyConnectionsData {
     uint perBodyConnections[MAX_CONNECTIONS];
-    uint numConnections;
+    uint numPerBodyConnections;
 };
 
 struct ConnectionsData {
-    struct PerBodyConnectionsData connections[NUM_BODIES];
-    uint numBodiesWithConnections;
+    struct PerBodyConnectionsData connections[MAX_BODIES];
+    uint numConnections;
 };

@@ -15,7 +15,6 @@ public enum MovieParseError : Error {
 @Model public class Movie : Equatable  {
     @Transient public var contentionScore : Double = 0
     @Transient public var positionIndex : Int? = nil
-    @Transient public var movieConnections : [String] = []
     
     public var dateWatched : Date? = nil
     
@@ -196,7 +195,6 @@ public struct MovieDTO: Identifiable, Sendable, Hashable {
     // Transient properties for UI
     public var contentionScore: Double = 0
     public var positionIndex: Int? = nil
-    public var movieConnections: [String] = []
     
     init(from movie: Movie) {
         self.id = movie.rottenId
@@ -232,7 +230,6 @@ public struct MovieDTO: Identifiable, Sendable, Hashable {
         
         self.contentionScore = movie.contentionScore
         self.positionIndex = movie.positionIndex
-        self.movieConnections = movie.movieConnections
     }
     
     public func hash(into hasher: inout Hasher) {
@@ -241,6 +238,10 @@ public struct MovieDTO: Identifiable, Sendable, Hashable {
     
     public static func == (lhs: MovieDTO, rhs: MovieDTO) -> Bool {
         lhs.persistentID == rhs.persistentID
+    }
+    
+    public static func == (lhs: MovieDTO, rhs: Movie) -> Bool {
+        lhs.persistentID == rhs.id
     }
 }
 

@@ -14,8 +14,7 @@ public enum MovieEdgeError  : Error {
     case noSharedMoviePeople
 }
 
-public struct MovieEdge : Identifiable {
-    public let id = UUID()
+public struct MovieEdge {
     
     public let aNodePositionIndex : Int
     public let bNodePositionIndex : Int
@@ -24,36 +23,23 @@ public struct MovieEdge : Identifiable {
     public let directors : Bool
     public let actors : Bool
     
-    public init(_ aNode : borrowing MovieDTO, _ bNode : borrowing MovieDTO) throws(MovieEdgeError) {
-        
-        let areThereSharedWriters = Self.findSharedPeople(between: aNode.writers, and: bNode.writers)
-        let areThereSharedDirectors = Self.findSharedPeople(between: aNode.directors, and: bNode.directors)
-        let areThereSharedActors = Self.findSharedPeople(between: aNode.actors, and: bNode.actors)
-        
-        let areThereAnySharedRoles : Bool = !areThereSharedWriters && !areThereSharedDirectors && !areThereSharedActors
-        
-        guard !areThereAnySharedRoles else {
-            throw MovieEdgeError.noSharedMoviePeople
-        }
-                
-        guard let aIdx = aNode.positionIndex, let bIdx = bNode.positionIndex else {
-            throw MovieEdgeError.invalidNodeIndices
-        }
-        
-        self.aNodePositionIndex = aIdx
-        self.bNodePositionIndex = bIdx
-        
-        self.writers = areThereSharedWriters
-        self.directors = areThereSharedDirectors
-        self.actors = areThereSharedActors
+    public init (aNodePositionIndex : Int, bNodePositionIndex : Int, writers : Bool, directors : Bool, actors : Bool) {
+        self.aNodePositionIndex = aNodePositionIndex
+        self.bNodePositionIndex = bNodePositionIndex
+        self.writers = writers
+        self.directors = directors
+        self.actors = actors
     }
     
-    private static func findSharedPeople(between moviePeopleA : consuming [MoviePersonDTO], and moviePeopleB : consuming [MoviePersonDTO]) -> Bool {
-        let moviePeopleASet : Set<String> = Set(moviePeopleA.map(\.name))
-        let moviePeopleBSet : Set<String> = Set(moviePeopleB.map(\.name))
-        
-        let areThereSharedMoviePeople : Bool = !moviePeopleASet.intersection(moviePeopleBSet).isEmpty
-        
-        return areThereSharedMoviePeople
+    static func findSharedPeople(between moviePeopleA : [MoviePersonDTO], and moviePeopleB : [MoviePersonDTO]) -> Bool {
+        for moviePersonA in moviePeopleA {
+            for moviePersonB in moviePeopleB { // Only consider movies after indexA
+                if moviePersonA.id == moviePersonB.id {
+                    return true
+                }
+            }
+        }
+                
+        return false
     }
 }
