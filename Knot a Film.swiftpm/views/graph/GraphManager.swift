@@ -40,7 +40,7 @@ import SharedWithMetal
 
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[0..<100])
+        let movies = Array(moviesTotal[..<40])
         
         var perBodyConnectionsDataArray : [PerBodyConnectionsData] = .init(repeating: .init(), count: movies.count)
         var numConnections : Int32 = 0
@@ -68,11 +68,11 @@ import SharedWithMetal
             if appendIdx > 0 {
                 perBodyConnectionsData.numPerBodyConnections = uint(appendIdx)
                 perBodyConnectionsDataArray[aIdx] = perBodyConnectionsData
-                numConnections += 1//Int32(appendIdx)
+                numConnections += 1
             }
         }
         
-        let renderer = GraphRenderer.init(perBodyConnections: perBodyConnectionsDataArray, numConnections: numConnections)
+        let renderer = GraphRenderer.init(perBodyConnections: perBodyConnectionsDataArray, numConnections: UInt32(numConnections))
         return Self.init(movies, moviePeople, renderer)
     }
     

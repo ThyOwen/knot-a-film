@@ -12,12 +12,28 @@
 
 using namespace metal;
 
+constant uint   numBodies          [[ function_constant(FC_NUM_BODIES) ]];
+constant uint   numConnections     [[ function_constant(FC_NUM_CONNECTIONS) ]];
+constant uint   numNodes           [[ function_constant(FC_NUM_NODES) ]];
+constant uint   leafLimit          [[ function_constant(FC_LEAF_LIMIT) ]];
+
+constant int   blockSize          [[ function_constant(FC_BLOCK_SIZE) ]];
+constant bool  useBarnes          [[ function_constant(FC_USE_BARNES) ]];
+
+constant float springConstant     [[ function_constant(FC_SPRING_CONSTANT) ]];
+constant float edgeRepulsion      [[ function_constant(FC_EDGE_REPULSION) ]];
+constant float edgeAttraction     [[ function_constant(FC_EDGE_ATTRACTION) ]];
+constant float epsilon            [[ function_constant(FC_EPSILON) ]];
+constant float dt                 [[ function_constant(FC_DT) ]];
+constant float theta              [[ function_constant(FC_THETA) ]];
+constant float collisionThreshold [[ function_constant(FC_COLLISION_THRESHOLD) ]];
+constant float damping            [[ function_constant(FC_DAMPING) ]];
 
 kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
                               constant PhysicsParams& params [[buffer(1)]],
                               uint gid [[thread_position_in_grid]])
 {
-    if (gid >= bodyData.numBodies) {
+    if (gid >= numBodies) {
         return;
     }
 
@@ -25,7 +41,7 @@ kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
     float minDistance = 0.3f;
     float2 centerPos = { 0.0h, 0.0h };
 
-    float angle = 2.0f * M_PI_F * (float(gid) / (float)(bodyData.numBodies - 1));
+    float angle = 2.0f * M_PI_F * (float(gid) / (float)(numBodies - 1));
     float radius = (maxDistance - minDistance) * (fract(sin(float(gid) * 12.9898f) * 43758.5453f)) + minDistance;
 
     float x = centerPos.x + radius * cos(angle);
@@ -37,39 +53,10 @@ kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
     body.position = { x, y };
     body.velocity = { 0.0f, 0.0f };
     body.acceleration = { 0.0f, 0.0f };
+    body.initialIdx = gid;
     bodyData.bodies[gid] = body;
     
 }
-/*
-kernel void initalizeConnections( device ConnectionsData& bodyData [[buffer(0)]] ,
-                                  constant PhysicsParams& params [[buffer(1)]],
-                                  uint gid [[thread_position_in_grid]])
-{
-    if (gid >= bodyData.numBodies) {
-        return;
-    }
-
-    float maxDistance = 0.8f;
-    float minDistance = 0.3f;
-    float2 centerPos = { 0.0h, 0.0h };
-
-    float angle = 2.0f * M_PI_F * (float(gid) / (float)(bodyData.numBodies - 1));
-    float radius = (maxDistance - minDistance) * (fract(sin(float(gid) * 12.9898f) * 43758.5453f)) + minDistance;
-
-    float x = centerPos.x + radius * cos(angle);
-    float y = centerPos.y + radius * sin(angle);
-    float2 position = { x, y };
-
-    Body body;
-    body.mass = 1.0f;
-    body.radius = 0.00001f;
-    body.position = position;
-    body.velocity = { 0.0h, 0.0h };
-    body.acceleration = { 0.0h, 0.0h };
-    bodyData.bodies[gid] = body;
-    
-}
-*/
 /*
 ----------------------------------------------------------------------------------------
 RESET KERNEL
@@ -94,7 +81,7 @@ kernel void resetKernel(device NodeData &nodeData [[buffer(0)]],
 
     if (gid == 0) {
         nodeData.nodes[0].start = 0;
-        nodeData.nodes[0].end = bodyData.numBodies - 1;
+        nodeData.nodes[0].end = numBodies - 1;
     }
 }
 
@@ -107,10 +94,12 @@ COMPUTE BOUNDING BOX
 kernel void computeBoundingBoxKernel(device NodeData &nodeData [[buffer(0)]],
                                      constant BodyData &bodyData [[buffer(1)]],
                                      device atomic_int *mutex [[buffer(2)]],
+                                     
                                      threadgroup float* __restrict__ topLeftX [[threadgroup(0)]],
                                      threadgroup float* __restrict__ topLeftY [[threadgroup(1)]],
                                      threadgroup float* __restrict__ bottomRightX [[threadgroup(2)]],
                                      threadgroup float* __restrict__ bottomRightY [[threadgroup(3)]],
+                                     
                                      ushort tid [[thread_position_in_threadgroup]],
                                      uint gid [[thread_position_in_grid]],
                                      ushort threadgroup_size [[threads_per_threadgroup]])
@@ -122,7 +111,7 @@ kernel void computeBoundingBoxKernel(device NodeData &nodeData [[buffer(0)]],
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    if (gid < uint(bodyData.numBodies)) {
+    if (gid < uint(numBodies)) {
         Body body = bodyData.bodies[gid];
         topLeftX[tid] = body.position.x;
         topLeftY[tid] = body.position.y;
@@ -246,7 +235,7 @@ inline void computeCenterOfMass(thread Node &curNode,
 
     for (int i = s; i < s + sz; ++i) {
         if (i <= end) {
-            Body body = bodyData.bodies[i];
+            thread Body body = bodyData.bodies[i];
             M += body.mass;
             R += body.mass * body.position;
         }
@@ -259,8 +248,7 @@ inline void computeCenterOfMass(thread Node &curNode,
         threadgroup_barrier(mem_flags::mem_threadgroup);
         if (tid < uint(stride)) {
             totalMass[tid] += totalMass[tid + stride];
-            centerOfMass[tid].x += centerOfMass[tid + stride].x;
-            centerOfMass[tid].y += centerOfMass[tid + stride].y;
+            centerOfMass[tid] += centerOfMass[tid + stride];
         }
     }
 
@@ -337,10 +325,11 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
                                     constant BodyData &bodyData [[buffer(1)]],
                                     device BodyData &bufferData [[buffer(2)]],
                                     constant int &nodeOffset [[buffer(3)]],
-                                    constant int &leafLimit [[buffer(4)]],
+                                    
                                     threadgroup int* __restrict__ count [[threadgroup(0)]],
                                     threadgroup float* __restrict__ totalMass [[threadgroup(1)]],
                                     threadgroup float2* __restrict__ centerOfMass [[threadgroup(2)]],
+                                    
                                     ushort tid [[thread_position_in_threadgroup]],
                                     uint bid [[threadgroup_position_in_grid]],
                                     ushort threadgroup_size [[threads_per_threadgroup]])
@@ -425,31 +414,33 @@ COMPUTE FORCE
 ----------------------------------------------------------------------------------------
 */
 template<typename N>
-inline float getDistance(N pos1, N pos2) {
+inline float getDistance( N pos1,
+                          N pos2 ) {
     N delta = pos1 - pos2;
     N deltaSquared = pow(delta, 2);
     return sqrt(deltaSquared.x + deltaSquared.y);
 }
 
-inline bool isCollide(Body b1, float2 cm, float collisionThreshold) {
+inline bool isCollide(Body b1,
+                      float2 cm,
+                      float collisionThreshold ) {
     return (b1.radius * 2 + collisionThreshold) > getDistance(b1.position, cm);
 }
 
-inline bool isCollide(thread const Body &b1,
-                      thread const Body &b2,
-                      float collisionThreshold) {
+inline bool isCollide( thread const Body &b1,
+                       thread const Body &b2,
+                       float collisionThreshold ) {
     return (b1.radius + b2.radius + collisionThreshold) > getDistance(b1.position, b2.position);
 }
 
 
-inline void computeForce( constant const NodeData &nodeData,
-                          const device BodyData &bodyData,
-                          thread Body& bi,
-                          int nodeIndex,
-                          int bodyIndex,
-                          int leafLimit,
-                          float width,
-                          constant const PhysicsParams &physics)
+inline void computeBarnesHuntForce( constant const NodeData &nodeData,
+                                    const device BodyData &bodyData,
+                                    thread Body& bi,
+                                    int nodeIndex,
+                                    int bodyIndex,
+                                    float width,
+                                    constant PhysicsParams &physics )
 {
     uint stack[32];
     float widthStack[32];
@@ -471,30 +462,40 @@ inline void computeForce( constant const NodeData &nodeData,
         Node curNode = nodeData.nodes[curIndex];
 
         if (curNode.isLeaf) {
-            if (curNode.centerOfMass.x != -1 && !isCollide(bi, curNode.centerOfMass, physics.collisionThreshold)) {
-                float dist = getDistance(bi.position, curNode.centerOfMass);
-                if (dist > 0.01f) {
-                    float2 rij = curNode.centerOfMass - bi.position;
-                    float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (physics.epsilon));
-                    float f = (bi.mass * curNode.totalMass) / (r * r + (physics.epsilon));
-                    float2 force = { rij.x * f, rij.y * f };
-
-                    bi.acceleration -= (force / bi.mass);
-                }
-            }
-            continue;
-        }
+             if (curNode.centerOfMass.x != -1.0h) {
+                 float2 delta = curNode.centerOfMass - bi.position;
+                 float distanceSquared = dot(delta, delta) + physics.epsilon;
+                 float distance = sqrt(distanceSquared);
+                 
+                 
+                 if (distance > physics.epsilon) {
+                     float2 direction = delta / distance;
+                     
+                     // Coulomb: F_rep = k_rep / distance^2
+                     float repulsionMagnitude = physics.edgeRepulsion / distanceSquared;
+                     
+                     bi.acceleration -= direction * repulsionMagnitude;
+                 }
+             }
+             continue;
+         }
 
         float sd = curWidth / getDistance(bi.position, curNode.centerOfMass);
         if (sd < physics.theta) {
             if (!isCollide(bi, curNode.centerOfMass, physics.collisionThreshold)) {
+                float2 delta = curNode.centerOfMass - bi.position;
+                float distanceSquared = dot(delta, delta) + physics.epsilon;
+                float distance = sqrt(distanceSquared);
                 
-                float2 rij = curNode.centerOfMass - bi.position;
-                float r = sqrt((rij.x * rij.x) + (rij.y * rij.y) + (physics.epsilon));
-                float f = (bi.mass * curNode.totalMass) / (r * r + (physics.epsilon));
-                float2 force = rij * f;
                 
-                bi.acceleration -= (force / bi.mass);
+                if (distance > physics.epsilon) {
+                    float2 direction = delta / distance;
+                    
+                    // Coulomb: F_rep = k_rep / distance^2
+                    float repulsionMagnitude = physics.edgeRepulsion / distanceSquared;
+                    
+                    bi.acceleration -= direction * repulsionMagnitude;
+                }
             }
             continue;
         }
@@ -521,25 +522,25 @@ inline void computeForce( constant const NodeData &nodeData,
     }
 }
 
-inline void computeDirectForce( const device BodyData& bodyData,
-                                thread Body& bi,
-                                constant PhysicsParams &physics,
-                                threadgroup Body* tileBlock,
-                                ushort tid,
-                                uint gid,
-                                ushort threadgroup_size)
+inline void computeDirectSumForce( const device BodyData& bodyData,
+                                   thread Body& bi,
+                                   constant PhysicsParams &physics,
+                                   threadgroup Body* tileBlock,
+                                   ushort tid,
+                                   uint gid,
+                                   ushort threadgroup_size )
 {
-    if (gid >= bodyData.numBodies) {
+    if (gid >= numBodies) {
         return;
     }
     
     float2 force = { 0.0f, 0.0f };
-    const int numTiles = (bodyData.numBodies + threadgroup_size - 1) / threadgroup_size;
+    const int numTiles = (numBodies + threadgroup_size - 1) / threadgroup_size;
     
     for (int tile = 0; tile < numTiles; ++tile) {
         uint idx = tile * threadgroup_size + tid;
         
-        if (idx < bodyData.numBodies) {
+        if (idx < numBodies) {
             tileBlock[tid] = bodyData.bodies[idx];
         } else {
             tileBlock[tid].position = { 0.0f, 0.0f };
@@ -553,7 +554,7 @@ inline void computeDirectForce( const device BodyData& bodyData,
         for (int b = 0; b < threadgroup_size; ++b) {
             uint j = tile * threadgroup_size + b;
             
-            if (j >= bodyData.numBodies)
+            if (j >= numBodies)
                 break;
             
             
@@ -592,7 +593,7 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
                                      uint gid,
                                      ushort threadgroup_size)
 {
-    if (gid >= bodyData.numBodies) {
+    if (gid >= numBodies) {
         return;
     }
     
@@ -643,30 +644,37 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
     bi.acceleration += force;
 }
 
-kernel void computeForceKernel( constant NodeData &nodeData [[buffer(0)]],
-                                constant ConnectionsData &connectionsData [[buffer(1)]],
+kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
+                                constant const ConnectionsData& connectionsData [[buffer(1)]],
                                 device BodyData &bodyData [[buffer(2)]],
-                                constant int &leafLimit [[buffer(3)]],
-                                constant PhysicsParams &physics [[buffer(4)]],
+                                constant const PhysicsParams &physics [[buffer(3)]],
+                
                                 threadgroup Body* tileBlock [[threadgroup(0)]],
+
                                 ushort tid [[thread_index_in_threadgroup]],
                                 uint gid [[thread_position_in_grid]],
-                                ushort threadgroup_size [[threads_per_threadgroup]])
+                                ushort threadgroup_size [[threads_per_threadgroup]] )
 {
-    if (gid >= bodyData.numBodies) {
+    if (gid >= numBodies) {
         return;
     }
     
-    float width = nodeData.nodes[0].bottomRight.x - nodeData.nodes[0].topLeft.x;
     
     thread Body bi = bodyData.bodies[gid];
-    thread PerBodyConnectionsData bConnections = connectionsData.connections[gid];
     
     bi.acceleration = { 0.0f, 0.0f };
 
-    //computeDirectForce(bodyData, bi, physics, tileBlock, tid, gid, threadgroup_size);
-    computeForce(nodeData, bodyData, bi, 0, gid, leafLimit, width, physics);
-    computeConnectionsForce(bodyData, bi, bConnections, connectionsData.numConnections, physics, tileBlock, tid, gid, threadgroup_size);
+    if (useBarnes) {
+        float width = nodeData.nodes[0].bottomRight.x - nodeData.nodes[0].topLeft.x;
+        computeBarnesHuntForce(nodeData, bodyData, bi, 0, gid, width, physics);
+    } else {
+        computeDirectSumForce(bodyData, bi, physics, tileBlock, tid, gid, threadgroup_size);
+    }
+    
+    if (gid < connectionsData.numConnections) {
+        thread PerBodyConnectionsData bConnections = connectionsData.connections[gid];
+        computeConnectionsForce(bodyData, bi, bConnections, connectionsData.numConnections, physics, tileBlock, tid, gid, threadgroup_size);
+    }
     
     bi.velocity *= physics.damping;
     bi.velocity += bi.acceleration * physics.dt;
@@ -680,7 +688,9 @@ kernel void computeForceKernel( constant NodeData &nodeData [[buffer(0)]],
     }
     
     bi.position += bi.velocity * physics.dt;
-    bodyData.bodies[gid] = bi;
+    bodyData.bodies[bi.initialIdx] = bi;
+    //bodyData.bodies[gid] = bi;
+
 }
 
 /*
@@ -689,7 +699,7 @@ EDGE
 ----------------------------------------------------------------------------------------
 */
 kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connections  [[buffer(0)]],
-                                        device ConnectionsData& connectionsData  [[buffer(1)]],
+                                        device ConnectionsData& connectionsData [[buffer(1)]],
                                         constant uint& numConnections  [[buffer(2)]],
                                         constant uint& numBodies  [[buffer(3)]],
                                         threadgroup uint2* __restrict__ connectionsTile [[threadgroup(0)]],
