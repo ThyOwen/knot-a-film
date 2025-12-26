@@ -40,7 +40,7 @@ import SharedWithMetal
 
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[..<40])
+        let movies = Array(moviesTotal[..<100])
         
         var perBodyConnectionsDataArray : [PerBodyConnectionsData] = .init(repeating: .init(), count: movies.count)
         var numConnections : Int32 = 0

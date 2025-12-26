@@ -14,7 +14,9 @@
 #define FC_NUM_NODES            2
 #define FC_LEAF_LIMIT           3
 #define FC_BLOCK_SIZE           4
-#define FC_USE_BARNES           7
+#define FC_USE_BARNES           6
+#define FC_COMPUTE_CONNECTIONS  7
+
 #define FC_SPRING_CONSTANT      8
 #define FC_EDGE_REPULSION       9
 #define FC_EDGE_ATTRACTION      10
@@ -49,6 +51,7 @@ struct GraphParams {
 
     int blockSize;
     bool useBarnes;
+    bool computeConnections;
 
     struct PhysicsParams physics;
 };

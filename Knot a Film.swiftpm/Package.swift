@@ -45,6 +45,7 @@ let package = Package(
             name: "AppModule",
             dependencies: ["SharedWithMetal"],
             path: ".",
+            exclude: ["views/graph/SharedWithMetal"],
             resources: [
                 .process("views/graph/metal"),
                 .process("Resources/visuals"),
@@ -56,7 +57,7 @@ let package = Package(
         ),
         .target(
             name: "SharedWithMetal",
-            path: "views/graph/metal",
+            path: "views/graph/SharedWithMetal",
             publicHeadersPath: "include"
         )
     ],

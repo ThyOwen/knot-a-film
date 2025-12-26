@@ -47,6 +47,12 @@ extension GraphParams {
             type: .bool,
             index: Int(FC_USE_BARNES)
         )
+        
+        metalFunctionConstants.setConstantValue(
+            &self.computeConnections,
+            type: .bool,
+            index: Int(FC_COMPUTE_CONNECTIONS)
+        )
 
         metalFunctionConstants.setConstantValue(
             &self.physics.springConstant,
@@ -108,8 +114,9 @@ extension GraphParams {
         p.numNodes = (UInt32(pow(4.0, Double(p.maxDepth + 1))) - 1) / 3
         p.leafLimit = (UInt32(pow(4.0, Double(p.maxDepth))) - 1) / 3
 
-        p.blockSize = 512
+        p.blockSize = 32
         p.useBarnes = true
+        p.computeConnections = true
 
         p.physics.springConstant = 1.0
         p.physics.edgeRepulsion = 1.0
@@ -156,7 +163,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
     public var screenTransform : ScreenTransform = .init(offset: .zero, scale: .init(1.0, 1.0))
 
-    private let threadgroupSize = MTLSize(width: 256, height: 1, depth: 1)
+    private let threadgroupSize = MTLSize(width: 32, height: 1, depth: 1)
+
     
     public init(perBodyConnections : consuming [PerBodyConnectionsData], numConnections : UInt32) {
 
@@ -301,13 +309,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(nodeBuffer, offset: 0, index: 0)
         encoder.setBuffer(bodyBuffer, offset: 0, index: 1)
         encoder.setBuffer(mutexBuffer, offset: 0, index: 2)
-        
-        let threadgroupMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
-        encoder.setThreadgroupMemoryLength(threadgroupMemSize, index: 0)
-        encoder.setThreadgroupMemoryLength(threadgroupMemSize, index: 1)
-        encoder.setThreadgroupMemoryLength(threadgroupMemSize, index: 2)
-        encoder.setThreadgroupMemoryLength(threadgroupMemSize, index: 3)
-        
+                
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                               height: 1, depth: 1)
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
@@ -333,11 +335,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
             encoder.setBytes(&nodeOffset, length: MemoryLayout<Int32>.stride, index: 3)
 
             let countMemSize = MemoryLayout<Int32>.stride * 8
-            let massMemSize = MemoryLayout<Float>.stride * threadgroupSize.width
-            let centerMemSize = MemoryLayout<SIMD2<Float32>>.stride * threadgroupSize.width
             encoder.setThreadgroupMemoryLength(countMemSize, index: 0)
-            encoder.setThreadgroupMemoryLength(massMemSize, index: 1)
-            encoder.setThreadgroupMemoryLength(centerMemSize, index: 2)
             
             let gridSize = MTLSize(width: nodesInLevel, height: 1, depth: 1)
             encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
@@ -361,10 +359,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(connectionsBuffer, offset: 0, index: 1)
         encoder.setBuffer(bodyBuffer, offset: 0, index: 2)
         encoder.setBytes(&self.params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 3)
-        
-        let tileBlockMemSize = MemoryLayout<Body>.stride * Int(params.blockSize)
-        encoder.setThreadgroupMemoryLength(tileBlockMemSize, index: 0)
-        
+                
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                                height: 1, depth: 1)
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
@@ -417,9 +412,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
         // POINTS
         renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
-        renderEncoder.setObjectBuffer(self.bodyBuffer, offset: 0, index: 0)
-        renderEncoder.setObjectBuffer(self.transformBuffer, offset: 0, index: 1)
-        renderEncoder.setObjectBuffer(self.connectionsBuffer, offset: 0, index: 2)
+        //renderEncoder.setObjectBuffer(self.bodyBuffer, offset: 0, index: 0)
+        //renderEncoder.setObjectBuffer(self.transformBuffer, offset: 0, index: 1)
+        //renderEncoder.setObjectBuffer(self.connectionsBuffer, offset: 0, index: 2)
         renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: oneThread, threadsPerMeshThreadgroup: oneThread)
     
         renderEncoder.endEncoding()

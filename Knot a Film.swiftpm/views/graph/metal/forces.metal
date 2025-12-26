@@ -6,9 +6,13 @@
 //
 
 // based on https://github.com/Hsin-Hung/N-body-simulation
+//
+//  forces.metal
+//  Knot a Film
+//
 
 #include <metal_stdlib>
-#include "include/GraphMetalTypes.h"
+#include "SharedWithMetal.h"
 
 using namespace metal;
 
@@ -19,6 +23,7 @@ constant uint   leafLimit          [[ function_constant(FC_LEAF_LIMIT) ]];
 
 constant int   blockSize          [[ function_constant(FC_BLOCK_SIZE) ]];
 constant bool  useBarnes          [[ function_constant(FC_USE_BARNES) ]];
+constant bool  computeConnections [[ function_constant(FC_COMPUTE_CONNECTIONS) ]];
 
 constant float springConstant     [[ function_constant(FC_SPRING_CONSTANT) ]];
 constant float edgeRepulsion      [[ function_constant(FC_EDGE_REPULSION) ]];
@@ -55,8 +60,8 @@ kernel void initalizeBodies ( device BodyData& bodyData [[buffer(0)]] ,
     body.acceleration = { 0.0f, 0.0f };
     body.initialIdx = gid;
     bodyData.bodies[gid] = body;
-    
 }
+
 /*
 ----------------------------------------------------------------------------------------
 RESET KERNEL
@@ -95,60 +100,46 @@ kernel void computeBoundingBoxKernel(device NodeData &nodeData [[buffer(0)]],
                                      constant BodyData &bodyData [[buffer(1)]],
                                      device atomic_int *mutex [[buffer(2)]],
                                      
-                                     threadgroup float* __restrict__ topLeftX [[threadgroup(0)]],
-                                     threadgroup float* __restrict__ topLeftY [[threadgroup(1)]],
-                                     threadgroup float* __restrict__ bottomRightX [[threadgroup(2)]],
-                                     threadgroup float* __restrict__ bottomRightY [[threadgroup(3)]],
-                                     
-                                     ushort tid [[thread_position_in_threadgroup]],
                                      uint gid [[thread_position_in_grid]],
-                                     ushort threadgroup_size [[threads_per_threadgroup]])
+                                     ushort simd_lane_id [[thread_index_in_simdgroup]],
+                                     ushort simd_group_id [[simdgroup_index_in_threadgroup]])
 {
-    topLeftX[tid] = INFINITY;
-    topLeftY[tid] = -INFINITY;
-    bottomRightX[tid] = -INFINITY;
-    bottomRightY[tid] = INFINITY;
+    float topLeftX = INFINITY;
+    float topLeftY = -INFINITY;
+    float bottomRightX = -INFINITY;
+    float bottomRightY = INFINITY;
 
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    if (gid < uint(numBodies)) {
+    if (gid < (uint)numBodies) {
         Body body = bodyData.bodies[gid];
-        topLeftX[tid] = body.position.x;
-        topLeftY[tid] = body.position.y;
-        bottomRightX[tid] = body.position.x;
-        bottomRightY[tid] = body.position.y;
+        topLeftX = body.position.x;
+        topLeftY = body.position.y;
+        bottomRightX = body.position.x;
+        bottomRightY = body.position.y;
     }
 
-    for (int s = threadgroup_size / 2; s > 0; s >>= 1) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (tid < s) {
-            topLeftX[tid] = fmin(topLeftX[tid], topLeftX[tid + s]);
-            topLeftY[tid] = fmax(topLeftY[tid], topLeftY[tid + s]);
-            bottomRightX[tid] = fmax(bottomRightX[tid], bottomRightX[tid + s]);
-            bottomRightY[tid] = fmin(bottomRightY[tid], bottomRightY[tid + s]);
-        }
-    }
+    topLeftX = simd_min(topLeftX);
+    topLeftY = simd_max(topLeftY);
+    bottomRightX = simd_max(bottomRightX);
+    bottomRightY = simd_min(bottomRightY);
 
-    if (tid == 0) {
+    if (simd_lane_id == 0) {
         int expected = 0;
-        while (!atomic_compare_exchange_weak_explicit(&mutex[0], &expected, 1, 
-                                                       memory_order_relaxed, 
+        while (!atomic_compare_exchange_weak_explicit(&mutex[0], &expected, 1,
+                                                       memory_order_relaxed,
                                                        memory_order_relaxed))
         {
             expected = 0;
         }
         
-
-        //bounding of the quad tree construction with some padding that is super gittery
-        float rangeX = topLeftX[0] - bottomRightX[0];
-        float rangeY = topLeftY[0] - bottomRightY[0];
+        float rangeX = topLeftX - bottomRightX;
+        float rangeY = topLeftY - bottomRightY;
         float paddingX = max(abs(rangeX) * 0.01f, 0.1f);
         float paddingY = max(abs(rangeY) * 0.01f, 0.1f);
         
-        nodeData.nodes[0].topLeft.x = fmin(nodeData.nodes[0].topLeft.x, topLeftX[0] - paddingX);
-        nodeData.nodes[0].topLeft.y = fmax(nodeData.nodes[0].topLeft.y, topLeftY[0] + paddingY);
-        nodeData.nodes[0].bottomRight.x = fmax(nodeData.nodes[0].bottomRight.x, bottomRightX[0] + paddingX);
-        nodeData.nodes[0].bottomRight.y = fmin(nodeData.nodes[0].bottomRight.y, bottomRightY[0] - paddingY);
+        nodeData.nodes[0].topLeft.x = -10.0f;//fmin(nodeData.nodes[0].topLeft.x, topLeftX - paddingX);
+        nodeData.nodes[0].topLeft.y = 10.0f;//fmax(nodeData.nodes[0].topLeft.y, topLeftY + paddingY);
+        nodeData.nodes[0].bottomRight.x = 10.0f;//fmax(nodeData.nodes[0].bottomRight.x, bottomRightX + paddingX);
+        nodeData.nodes[0].bottomRight.y = -10.0f;//fmin(nodeData.nodes[0].bottomRight.y, bottomRightY - paddingY);
         
         atomic_store_explicit(&mutex[0], 0, memory_order_relaxed);
     }
@@ -165,66 +156,23 @@ inline int getQuadrant(float2 topLeft,
                        float x,
                        float y)
 {
-    if ((topLeft.x + bottomRight.x) / 2 >= x) { 
-        if ((topLeft.y + bottomRight.y) / 2 <= y) {
-            return 2;// topLeftTree
-        } else {
-            return 3;// botLeftTree
-        }
-    } else {
-        if ((topLeft.y + bottomRight.y) / 2 <= y)
-        {
-            return 1;// topRightTree
-        } else {
-            return 4;// bottomRightTree
-        }
-    }
-}
+    float midX = (topLeft.x + bottomRight.x) * 0.5f;
+    float midY = (topLeft.y + bottomRight.y) * 0.5f;
+    
+    bool left  = (midX >= x);
+    bool top   = (midY <= y);
 
-inline void updateChildBound(float2 tl, float2 br,
-                             thread Node &childNode,
-                             int quadrant)
-{
-    if (quadrant == 1) {
-        childNode.topLeft = {(tl.x + br.x) / 2, tl.y};
-        childNode.bottomRight = {br.x, (tl.y + br.y) / 2};
-    } else if (quadrant == 2) {
-        childNode.topLeft = {tl.x, tl.y};
-        childNode.bottomRight = {(tl.x + br.x) / 2, (tl.y + br.y) / 2};
-    } else if (quadrant == 3) {
-        childNode.topLeft = {tl.x, (tl.y + br.y) / 2};
-        childNode.bottomRight = {(tl.x + br.x) / 2, br.y};
-    } else {
-        childNode.topLeft = {(tl.x + br.x) / 2, (tl.y + br.y) / 2};
-        childNode.bottomRight = {br.x, br.y};
-    }
-}
-
-inline void warpReduce(threadgroup volatile float* totalMass,
-                       threadgroup volatile float2* centerOfMass,
-                       uint tid)
-{
-    totalMass[tid] += totalMass[tid + 32];
-    centerOfMass[tid] += centerOfMass[tid + 32];
-    totalMass[tid] += totalMass[tid + 16];
-    centerOfMass[tid] += centerOfMass[tid + 16];
-    totalMass[tid] += totalMass[tid + 8];
-    centerOfMass[tid] += centerOfMass[tid + 8];
-    totalMass[tid] += totalMass[tid + 4];
-    centerOfMass[tid] += centerOfMass[tid + 4];
-    totalMass[tid] += totalMass[tid + 2];
-    centerOfMass[tid] += centerOfMass[tid + 2];
-    totalMass[tid] += totalMass[tid + 1];
-    centerOfMass[tid] += centerOfMass[tid + 1];
+    return left
+        ? (top ? 2 : 3)
+        : (top ? 1 : 4);
 }
 
 inline void computeCenterOfMass(thread Node &curNode,
                                 constant BodyData &bodyData,
-                                threadgroup float* totalMass,
-                                threadgroup float2* centerOfMass,
                                 int start,
                                 int end,
                                 uint tid,
+                                ushort simd_lane_id,
                                 ushort threadgroup_size)
 {
     int total = end - start + 1;
@@ -241,26 +189,15 @@ inline void computeCenterOfMass(thread Node &curNode,
         }
     }
 
-    totalMass[tid] = M;
-    centerOfMass[tid] = R;
+    M = simd_sum(M);
+    R.x = simd_sum(R.x);
+    R.y = simd_sum(R.y);
 
-    for (int stride = threadgroup_size / 2; stride > 32; stride >>= 1) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (tid < uint(stride)) {
-            totalMass[tid] += totalMass[tid + stride];
-            centerOfMass[tid] += centerOfMass[tid + stride];
-        }
-    }
-
-    if (tid < 32) {
-        warpReduce(totalMass, centerOfMass, tid);
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    if (tid == 0) {
-        centerOfMass[0] /= totalMass[0];
-        curNode.totalMass = totalMass[0];
-        curNode.centerOfMass = centerOfMass[0];
+    
+    if (simd_lane_id == 0 && M > 0.0f) { //store result from first lane of each simdgroup
+        R /= M;
+        curNode.totalMass = M;
+        curNode.centerOfMass = R;
     }
 }
 
@@ -300,8 +237,8 @@ inline void computeOffset(threadgroup int* __restrict__ count,
     threadgroup_barrier(mem_flags::mem_threadgroup);
 }
 
-inline void groupBodies(constant BodyData &bodyData, 
-                        device BodyData &bufferData, 
+inline void groupBodies(constant BodyData &bodyData,
+                        device BodyData &bufferData,
                         float2 topLeft,
                         float2 bottomRight,
                         threadgroup int* __restrict__ count,
@@ -310,7 +247,7 @@ inline void groupBodies(constant BodyData &bodyData,
                         uint tid,
                         ushort threadgroup_size)
 {
-    threadgroup int *count2 = &count[4];
+    threadgroup int* count2 = &count[4];
     for (int i = start + tid; i <= end; i += threadgroup_size)
     {
         Body body = bodyData.bodies[i];
@@ -327,11 +264,10 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
                                     constant int &nodeOffset [[buffer(3)]],
                                     
                                     threadgroup int* __restrict__ count [[threadgroup(0)]],
-                                    threadgroup float* __restrict__ totalMass [[threadgroup(1)]],
-                                    threadgroup float2* __restrict__ centerOfMass [[threadgroup(2)]],
                                     
                                     ushort tid [[thread_position_in_threadgroup]],
                                     uint bid [[threadgroup_position_in_grid]],
+                                    ushort simd_lane_id [[thread_index_in_simdgroup]],
                                     ushort threadgroup_size [[threads_per_threadgroup]])
 {
     uint nodeIndex = nodeOffset + bid;
@@ -339,20 +275,20 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
     if (nodeIndex >= nodeData.numNodes)
         return;
 
-    Node curNode = nodeData.nodes[nodeIndex];
+    thread Node curNode = nodeData.nodes[nodeIndex];
     int start = curNode.start, end = curNode.end;
     float2 topLeft = curNode.topLeft, bottomRight = curNode.bottomRight;
 
     if (start == -1 || end == -1)
         return;
 
-    computeCenterOfMass(curNode, bodyData, totalMass, centerOfMass, start, end, tid, threadgroup_size);
+    computeCenterOfMass(curNode, bodyData, start, end, tid, simd_lane_id, threadgroup_size);
     
-    // Write back the updated node
     if (tid == 0) {
         nodeData.nodes[nodeIndex] = curNode;
     }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    //threadgroup_barrier(mem_flags::mem_threadgroup);
     
     if (nodeIndex >= uint(leafLimit) || start == end) {
         for (int i = start; i <= end; ++i) {
@@ -364,48 +300,61 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
     countBodies(bodyData, topLeft, bottomRight, count, start, end, tid, threadgroup_size);
     computeOffset(count, start, tid);
     groupBodies(bodyData, bufferData, topLeft, bottomRight, count, start, end, tid, threadgroup_size);
-    
+
+
+    if (tid < 4) { // update child bound
+        uint quadIndex = tid + 1;
+        Node node = nodeData.nodes[(nodeIndex * 4) + quadIndex];
+
+        float midX = (topLeft.x + bottomRight.x) / 2;
+        float midY = (topLeft.y + bottomRight.y) / 2;
+
+        switch (tid) {
+            case 0: // quadrant 1
+                node.topLeft     = { midX, topLeft.y };
+                node.bottomRight = { bottomRight.x, midY };
+                if (count[0] > 0) {
+                    node.start = start;
+                    node.end   = start + count[0] - 1;
+                }
+                break;
+
+            case 1: // quadrant 2
+                node.topLeft     = { topLeft.x, topLeft.y };
+                node.bottomRight = { midX, midY };
+                if (count[1] > 0) {
+                    node.start = start + count[0];
+                    node.end   = node.start + count[1] - 1;
+                }
+                break;
+
+            case 2: // quadrant 3
+                node.topLeft     = { topLeft.x, midY };
+                node.bottomRight = { midX, bottomRight.y };
+                if (count[2] > 0) {
+                    node.start = start + count[0] + count[1];
+                    node.end   = node.start + count[2] - 1;
+                }
+                break;
+
+            case 3: // quadrant 4
+                node.topLeft     = { midX, midY };
+                node.bottomRight = { bottomRight.x, bottomRight.y };
+                if (count[3] > 0) {
+                    node.start = start + count[0] + count[1] + count[2];
+                    node.end   = end;
+                }
+                break;
+        }
+
+        nodeData.nodes[(nodeIndex * 4) + quadIndex] = node;
+    }
+
     if (tid == 0) {
-        Node topLNode = nodeData.nodes[(nodeIndex * 4) + 2];
-        Node topRNode = nodeData.nodes[(nodeIndex * 4) + 1];
-        Node botLNode = nodeData.nodes[(nodeIndex * 4) + 3];
-        Node botRNode = nodeData.nodes[(nodeIndex * 4) + 4];
-
-        updateChildBound(topLeft, bottomRight, topLNode, 2);
-        updateChildBound(topLeft, bottomRight, topRNode, 1);
-        updateChildBound(topLeft, bottomRight, botLNode, 3);
-        updateChildBound(topLeft, bottomRight, botRNode, 4);
-
         curNode.isLeaf = false;
-
-        if (count[0] > 0) {
-            topRNode.start = start;
-            topRNode.end = start + count[0] - 1;
-        }
-
-        if (count[1] > 0) {
-            topLNode.start = start + count[0];
-            topLNode.end = start + count[0] + count[1] - 1;
-        }
-
-        if (count[2] > 0) {
-            botLNode.start = start + count[0] + count[1];
-            botLNode.end = start + count[0] + count[1] + count[2] - 1;
-        }
-
-        if (count[3] > 0) {
-            botRNode.start = start + count[0] + count[1] + count[2];
-            botRNode.end = end;
-        }
-        
-        // Write back all child nodes
-        nodeData.nodes[(nodeIndex * 4) + 1] = topRNode;
-        nodeData.nodes[(nodeIndex * 4) + 2] = topLNode;
-        nodeData.nodes[(nodeIndex * 4) + 3] = botLNode;
-        nodeData.nodes[(nodeIndex * 4) + 4] = botRNode;
-        
         nodeData.nodes[nodeIndex] = curNode;
     }
+
 }
 
 /*
@@ -413,26 +362,21 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
 COMPUTE FORCE
 ----------------------------------------------------------------------------------------
 */
+
 template<typename N>
-inline float getDistance( N pos1,
-                          N pos2 ) {
+inline float getDistance( N pos1, N pos2 ) {
     N delta = pos1 - pos2;
     N deltaSquared = pow(delta, 2);
     return sqrt(deltaSquared.x + deltaSquared.y);
 }
 
-inline bool isCollide(Body b1,
-                      float2 cm,
-                      float collisionThreshold ) {
+inline bool isCollide(Body b1, float2 cm, float collisionThreshold ) {
     return (b1.radius * 2 + collisionThreshold) > getDistance(b1.position, cm);
 }
 
-inline bool isCollide( thread const Body &b1,
-                       thread const Body &b2,
-                       float collisionThreshold ) {
+inline bool isCollide( thread const Body &b1, thread const Body &b2, float collisionThreshold ) {
     return (b1.radius + b2.radius + collisionThreshold) > getDistance(b1.position, b2.position);
 }
-
 
 inline void computeBarnesHuntForce( constant const NodeData &nodeData,
                                     const device BodyData &bodyData,
@@ -467,13 +411,9 @@ inline void computeBarnesHuntForce( constant const NodeData &nodeData,
                  float distanceSquared = dot(delta, delta) + physics.epsilon;
                  float distance = sqrt(distanceSquared);
                  
-                 
                  if (distance > physics.epsilon) {
                      float2 direction = delta / distance;
-                     
-                     // Coulomb: F_rep = k_rep / distance^2
                      float repulsionMagnitude = physics.edgeRepulsion / distanceSquared;
-                     
                      bi.acceleration -= direction * repulsionMagnitude;
                  }
              }
@@ -487,13 +427,9 @@ inline void computeBarnesHuntForce( constant const NodeData &nodeData,
                 float distanceSquared = dot(delta, delta) + physics.epsilon;
                 float distance = sqrt(distanceSquared);
                 
-                
                 if (distance > physics.epsilon) {
                     float2 direction = delta / distance;
-                    
-                    // Coulomb: F_rep = k_rep / distance^2
                     float repulsionMagnitude = physics.edgeRepulsion / distanceSquared;
-                    
                     bi.acceleration -= direction * repulsionMagnitude;
                 }
             }
@@ -518,127 +454,98 @@ inline void computeBarnesHuntForce( constant const NodeData &nodeData,
             widthStack[stackIdx] = halfWidth;
             stackIdx++;
         }
- 
     }
 }
 
 inline void computeDirectSumForce( const device BodyData& bodyData,
                                    thread Body& bi,
                                    constant PhysicsParams &physics,
-                                   threadgroup Body* tileBlock,
-                                   ushort tid,
                                    uint gid,
-                                   ushort threadgroup_size )
+                                   ushort simd_lane_id )
 {
     if (gid >= numBodies) {
         return;
     }
     
     float2 force = { 0.0f, 0.0f };
-    const int numTiles = (numBodies + threadgroup_size - 1) / threadgroup_size;
     
-    for (int tile = 0; tile < numTiles; ++tile) {
-        uint idx = tile * threadgroup_size + tid;
+    for (uint base = 0; base < numBodies; base += 32) {
+        uint j = base + simd_lane_id;
         
-        if (idx < numBodies) {
-            tileBlock[tid] = bodyData.bodies[idx];
+        thread Body bj;
+        if (j < numBodies) {
+            bj = bodyData.bodies[j];
         } else {
-            tileBlock[tid].position = { 0.0f, 0.0f };
-            tileBlock[tid].mass = 0.0f;
-            tileBlock[tid].radius = 0.0f;
-            tileBlock[tid].velocity = { 0.0f, 0.0f };
+            bj.position = { 0.0f, 0.0f };
+            bj.mass = 0.0f;
+            bj.radius = 0.0f;
         }
         
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        
-        for (int b = 0; b < threadgroup_size; ++b) {
-            uint j = tile * threadgroup_size + b;
+        for (uint lane = 0; lane < 32 && (base + lane) < numBodies; ++lane) {
+            float2 pos = simd_broadcast(bj.position, lane);
+            //float mass = simd_broadcast(bj.mass, lane);
+            //float radius = simd_broadcast(bj.radius, lane);
             
-            if (j >= numBodies)
-                break;
+            uint otherIdx = base + lane;
+            if (otherIdx == gid)
+                continue; // Skip self
             
-            
-            if (j == gid) // Skip self-interaction
-                continue;
-            
-            thread Body bj = tileBlock[b];
-            float2 delta = bj.position - bi.position;
+            float2 delta = pos - bi.position;
             float distanceSquared = dot(delta, delta) + physics.epsilon;
             float distance = sqrt(distanceSquared);
             
             if (distance > physics.epsilon) {
                 float2 direction = delta / distance;
-                
-                // Coulomb: F_rep = k_rep / distance^2
                 float repulsionMagnitude = physics.edgeRepulsion / distanceSquared;
-                
                 force -= direction * repulsionMagnitude;
             }
         }
-        
-        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
     
     bi.acceleration += force;
 }
-
 
 inline void computeConnectionsForce( const device BodyData& bodyData,
                                      thread Body& bi,
                                      thread PerBodyConnectionsData& bConnections,
                                      constant uint& numBodiesWithConnections,
                                      constant PhysicsParams &physics,
-                                     threadgroup Body* __restrict__ tileBlock,
-                                     ushort tid,
                                      uint gid,
-                                     ushort threadgroup_size)
+                                     ushort simd_lane_id )
 {
     if (gid >= numBodies) {
         return;
     }
     
     float2 force = { 0.0f, 0.0f };
-    int numTiles = (bConnections.numPerBodyConnections + threadgroup_size - 1) / threadgroup_size;
     
-    for (int tile = 0; tile < numTiles; ++tile) {
-        uint localIdx = tile * threadgroup_size + tid;
+    for (uint base = 0; base < bConnections.numPerBodyConnections; base += 32) {
+        uint localIdx = base + simd_lane_id;
         
+        Body bj;
         if (localIdx < bConnections.numPerBodyConnections) {
             uint connectionIdx = bConnections.perBodyConnections[localIdx];
-            tileBlock[tid] = bodyData.bodies[connectionIdx];
+            bj = bodyData.bodies[connectionIdx];
         } else {
-            tileBlock[tid].position = { 0.0f, 0.0f };
-            tileBlock[tid].mass = 0.0f;
-            tileBlock[tid].radius = 0.0f;
-            tileBlock[tid].velocity = { 0.0f, 0.0f };
+            bj.position = { 0.0f, 0.0f };
+            bj.mass = 0.0f;
         }
         
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        
-        for (int b = 0; b < threadgroup_size; ++b) {
-            uint j = tile * threadgroup_size + b;
+        for (uint lane = 0; lane < 32 && (base + lane) < bConnections.numPerBodyConnections; ++lane) {
+            float2 pos = simd_broadcast(bj.position, lane);
             
-            if (j >= bConnections.numPerBodyConnections)
-                break;
-            
-            thread Body bj = tileBlock[b];
-            float2 delta = bj.position - bi.position;
+            float2 delta = pos - bi.position;
             float distanceSquared = dot(delta, delta) + physics.epsilon;
             float distance = sqrt(distanceSquared);
             
             if (distance > physics.epsilon) {
                 float2 direction = delta / distance;
-                
-                // Hooke's law: F_spring = k_spring * (distance - restLength)
-                float restLength = physics.edgeAttraction; // Target distance
+                float restLength = physics.edgeAttraction;
                 float displacement = distance - restLength;
                 float springMagnitude = physics.springConstant * displacement;
-                
                 force += direction * springMagnitude;
             }
         }
-        
-        threadgroup_barrier(mem_flags::mem_threadgroup);
     }
     
     bi.acceleration += force;
@@ -648,38 +555,33 @@ kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
                                 constant const ConnectionsData& connectionsData [[buffer(1)]],
                                 device BodyData &bodyData [[buffer(2)]],
                                 constant const PhysicsParams &physics [[buffer(3)]],
-                
-                                threadgroup Body* tileBlock [[threadgroup(0)]],
 
-                                ushort tid [[thread_index_in_threadgroup]],
                                 uint gid [[thread_position_in_grid]],
-                                ushort threadgroup_size [[threads_per_threadgroup]] )
+                                ushort simd_lane_id [[thread_index_in_simdgroup]] )
 {
     if (gid >= numBodies) {
         return;
     }
     
-    
     thread Body bi = bodyData.bodies[gid];
-    
     bi.acceleration = { 0.0f, 0.0f };
 
     if (useBarnes) {
         float width = nodeData.nodes[0].bottomRight.x - nodeData.nodes[0].topLeft.x;
         computeBarnesHuntForce(nodeData, bodyData, bi, 0, gid, width, physics);
     } else {
-        computeDirectSumForce(bodyData, bi, physics, tileBlock, tid, gid, threadgroup_size);
+        computeDirectSumForce(bodyData, bi, physics, gid, simd_lane_id);
     }
     
-    if (gid < connectionsData.numConnections) {
+    if (computeConnections && gid < connectionsData.numConnections) {
         thread PerBodyConnectionsData bConnections = connectionsData.connections[gid];
-        computeConnectionsForce(bodyData, bi, bConnections, connectionsData.numConnections, physics, tileBlock, tid, gid, threadgroup_size);
+        computeConnectionsForce(bodyData, bi, bConnections, connectionsData.numConnections, physics, gid, simd_lane_id);
     }
     
     bi.velocity *= physics.damping;
     bi.velocity += bi.acceleration * physics.dt;
     
-    float2 velocitySquared = bi.velocity * bi.velocity;
+    float2 velocitySquared = pow(bi.velocity, 2);
     float velMagnitude = sqrt(velocitySquared.x + velocitySquared.y);
     
     const float MAX_VELOCITY = 2.0f;
@@ -689,8 +591,6 @@ kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
     
     bi.position += bi.velocity * physics.dt;
     bodyData.bodies[bi.initialIdx] = bi;
-    //bodyData.bodies[gid] = bi;
-
 }
 
 /*
@@ -720,7 +620,6 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
     const int numConnectionTiles = (numConnections + threadgroup_size - 1) / threadgroup_size;
 
     for (int tile = 0; tile < numConnectionTiles; ++tile) {
-
         uint idx = tile * threadgroup_size + tid;
         if (idx < numConnections) {
             connectionsTile[tid] = connections[idx];
@@ -737,7 +636,6 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
 
             uint2 c = connectionsTile[b];
 
-            // check both directions
             if ((c.x == gid || c.y == gid) && appendIdx < MAX_CONNECTIONS) {
                 uint otherBody = (c.x == gid) ? c.y : c.x;
                 perBodyConnectionsData.perBodyConnections[appendIdx] = otherBody;

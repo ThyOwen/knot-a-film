@@ -6,7 +6,7 @@
 //
 
 #include <metal_stdlib>
-#include "include/GraphMetalTypes.h"
+#include "SharedWithMetal.h"
 
 using namespace metal;
 
