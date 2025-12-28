@@ -138,7 +138,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     let commandQueue: MTLCommandQueue
     
     private var initalizeBodiesPipeline : MTLComputePipelineState
-    private var coalesceConnectionsIndicesPipeline : MTLComputePipelineState
+    //private var coalesceConnectionsIndicesPipeline : MTLComputePipelineState
     private var resetPipeline : MTLComputePipelineState
     private var boundingBoxPipeline : MTLComputePipelineState
     private var constructTreePipeline : MTLComputePipelineState
@@ -215,10 +215,17 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let transformSize = MemoryLayout<ScreenTransform>.size
         self.transformBuffer = device.makeBuffer(length: transformSize,
                                                 options: .cpuCacheModeWriteCombined)!
-
-        let library = try! device.makeDefaultLibrary(bundle: .main)
         
-        // Render pipelines...
+        let shadersBundleURL = Bundle.main.bundleURL.appendingPathComponent("../Knot a Film_MetalShaders.bundle")
+        print(shadersBundleURL)
+        let bundle = Bundle(url: shadersBundleURL)!
+        let libraryURL = bundle.url(forResource: "debug", withExtension: "metallib")!
+        let library = try! device.makeLibrary(URL: libraryURL)
+        print(library)
+        
+        //let library = try! device.makeDefaultLibrary(bundle: .main)
+        
+        // Render pipelines
         let nodePipelineDescriptor = MTLRenderPipelineDescriptor()
         nodePipelineDescriptor.vertexFunction = library.makeFunction(name: "vertexNode")
         nodePipelineDescriptor.fragmentFunction = library.makeFunction(name: "fragmentNode")
@@ -248,8 +255,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let initalizeBodiesFunction = try! library.makeFunction(name: "initalizeBodies", constantValues: functionConstants)
         self.initalizeBodiesPipeline = try! device.makeComputePipelineState(function: initalizeBodiesFunction)
         
-        let coalesceConnectionsIndicesFunction = library.makeFunction(name: "coalesceConnectionsIndices")!
-        self.coalesceConnectionsIndicesPipeline = try! device.makeComputePipelineState(function: coalesceConnectionsIndicesFunction)
+        //let coalesceConnectionsIndicesFunction = library.makeFunction(name: "coalesceConnectionsIndices")!
+        //self.coalesceConnectionsIndicesPipeline = try! device.makeComputePipelineState(function: coalesceConnectionsIndicesFunction)
         
         let resetFunction = try! library.makeFunction(name: "resetKernel", constantValues: functionConstants)
         self.resetPipeline = try! device.makeComputePipelineState(function: resetFunction)

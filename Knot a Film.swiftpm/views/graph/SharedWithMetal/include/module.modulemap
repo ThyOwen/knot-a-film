@@ -1,3 +1,0 @@
-module SharedWithMetal {
-    header "../../metal/SharedWithMetal.h"
-}

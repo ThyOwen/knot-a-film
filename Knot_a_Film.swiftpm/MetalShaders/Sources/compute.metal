@@ -1,15 +1,4 @@
-//
-//  forces.metal
-//  Knot a Film
-//
-//  Created by Owen O'Malley on 12/2/25.
-//
-
-// based on https://github.com/Hsin-Hung/N-body-simulation
-//
-//  forces.metal
-//  Knot a Film
-//
+#if defined(__METAL_VERSION__)
 
 #include <metal_stdlib>
 #include "SharedWithMetal.h"
@@ -598,7 +587,7 @@ kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
 ----------------------------------------------------------------------------------------
 EDGE
 ----------------------------------------------------------------------------------------
-*/
+
 
 kernel void sortConnectionsIndicies( constant const NodeData &nodeData [[buffer(0)]],
                                      constant const ConnectionsData& connectionsData [[buffer(1)]],
@@ -658,3 +647,5 @@ kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connect
     perBodyConnectionsData.numPerBodyConnections = appendIdx;
     connectionsData.connections[tid] = perBodyConnectionsData;
 }
+ */
+#endif

@@ -11,53 +11,11 @@ using namespace metal;
 
 #define ARRAY_SIZE 1024
 #define SIMD_SIZE 32
-#define TILES_PER_SIMDGROUP (ARRAY_SIZE / SIMD_SIZE)
+#define ELEMENTS_PER_THREAD 4
+#define ELEMENTS_PER_TILE (SIMD_SIZE * ELEMENTS_PER_THREAD)
+#define TILES_PER_THREADGROUP (ARRAY_SIZE / ELEMENTS_PER_TILE)
 
-kernel void prefixSumSimple( constant int& n [[buffer(0)]],
-                             device int* data [[buffer(1)]],
-                             device int* outData [[buffer(2)]],
-                             ushort simd_lane_id [[thread_index_in_simdgroup]]
-) {
-    threadgroup float temp[SIMD_SIZE];
-    
-    int offset = 1;
-    
-    temp[2 * simd_lane_id + 1] = data[2 * simd_lane_id];
-    
-    for (int d = n >> 1; d > 0; d >>= 1) {
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-
-        if (simd_lane_id < d) {
-            int ai = offset * (2*simd_lane_id + 1) - 1;
-            int bi = offset * (2*simd_lane_id + 2) - 1;
-            temp[bi] += temp[ai];
-        }
-        offset *= 2;
-    }
-    
-    if (simd_lane_id == 0) {
-        temp[n - 1] = 0;
-    }
-    
-    for (int d = 1; d < n; d *= 2) {
-        offset >>= 1;
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (simd_lane_id < d) {
-            int ai = offset * (2 * simd_lane_id + 1) - 1;
-            int bi = offset * (2 * simd_lane_id + 2) - 1;
-            float t = temp[ai];
-            temp[ai] = temp[bi];
-            temp[bi] += t;
-        }
-    }
-    
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-    outData[2 * simd_lane_id] = temp[2 * simd_lane_id]; // write results to device memory
-    outData[2 * simd_lane_id + 1] = temp[2 * simd_lane_id + 1];
-
-}
-
-kernel void prefixSum(constant int& n [[buffer(0)]],
+kernel void prefixSum(constant uint& n [[buffer(0)]],
                       device const int* inData [[buffer(1)]],
                       device int* outData [[buffer(2)]],
                       uint simdgroup_id [[simdgroup_index_in_threadgroup]],
@@ -66,43 +24,61 @@ kernel void prefixSum(constant int& n [[buffer(0)]],
                       uint threadgroup_position_in_grid [[threadgroup_position_in_grid]])
 {
     threadgroup int sharedData[ARRAY_SIZE];
-    threadgroup int tileSums[TILES_PER_SIMDGROUP];
+    threadgroup int tileSums[TILES_PER_THREADGROUP];
     
-    const int simdgroups_per_threadgroup = threads_per_threadgroup / SIMD_SIZE;
-    const int tiles_per_simdgroup = TILES_PER_SIMDGROUP / simdgroups_per_threadgroup;
-    const int base_offset = threadgroup_position_in_grid * ARRAY_SIZE;
+    const uint simdgroups_per_threadgroup = threads_per_threadgroup / SIMD_SIZE;
+    const uint tiles_per_simdgroup = TILES_PER_THREADGROUP / simdgroups_per_threadgroup;
+    const uint base_offset = threadgroup_position_in_grid * ARRAY_SIZE;
     
-    // simdgroup assigned tiles
-    for (int tile = 0; tile < tiles_per_simdgroup; tile++) {
-        int tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
-        int tile_offset = tile_idx * SIMD_SIZE;
-        int global_idx = base_offset + tile_offset + simd_lane_id;
+    // Phase 1: Each simdgroup loads and processes its assigned tiles
+    for (uint tile = 0; tile < tiles_per_simdgroup; tile++) {
+        uint tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
+        uint tile_offset = tile_idx * ELEMENTS_PER_TILE;
         
-        int value = (global_idx < n) ? inData[global_idx] : 0;
+        // Load ELEMENTS_PER_THREAD values per thread
+        int values[ELEMENTS_PER_THREAD];
+        int thread_sum = 0;
         
-        int scanned = simd_prefix_exclusive_sum(value);
-        sharedData[tile_offset + simd_lane_id] = scanned;
+        for (uint i = 0; i < ELEMENTS_PER_THREAD; i++) {
+            uint global_idx = base_offset + tile_offset + simd_lane_id * ELEMENTS_PER_THREAD + i;
+            values[i] = (global_idx < n) ? inData[global_idx] : 0;
+            thread_sum += values[i];
+        }
         
-        int tile_sum = simd_sum(value);
+        // Step 1: Exclusive scan across threads to get per-thread offsets
+        int thread_offset = simd_prefix_exclusive_sum(thread_sum);
+        
+        // Step 2: Sequential scan within each thread's elements
+        int running_sum = thread_offset;
+        for (uint i = 0; i < ELEMENTS_PER_THREAD; i++) {
+            uint local_idx = tile_offset + simd_lane_id * ELEMENTS_PER_THREAD + i;
+            sharedData[local_idx] = running_sum;
+            running_sum += values[i];
+        }
+        
+        // Compute tile sum (sum of all elements in tile)
+        int tile_sum = simd_sum(thread_sum);
         
         if (simd_lane_id == 0) {
             tileSums[tile_idx] = tile_sum;
         }
+        
+        simdgroup_barrier(mem_flags::mem_threadgroup);
     }
     
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
-    // scan the tile sums to get prefix sums
+    // Phase 2: Scan the tile sums (unchanged)
     if (simdgroup_id == 0) {
         int running_sum = 0;
         
-        for (int i = 0; i < TILES_PER_SIMDGROUP; i += SIMD_SIZE) {
+        for (uint i = 0; i < TILES_PER_THREADGROUP; i += SIMD_SIZE) {
             uint idx = i + simd_lane_id;
-            int val = (idx < TILES_PER_SIMDGROUP) ? tileSums[idx] : 0;
+            int val = (idx < TILES_PER_THREADGROUP) ? tileSums[idx] : 0;
             
             int scanned = simd_prefix_exclusive_sum(val) + running_sum;
             
-            if (idx < TILES_PER_SIMDGROUP) {
+            if (idx < TILES_PER_THREADGROUP) {
                 tileSums[idx] = scanned;
             }
             
@@ -113,17 +89,23 @@ kernel void prefixSum(constant int& n [[buffer(0)]],
     
     threadgroup_barrier(mem_flags::mem_threadgroup);
     
-    // add prefix of tile sums to each element and write out
-    for (int tile = 0; tile < tiles_per_simdgroup; tile++) {
-        int tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
-        int tile_offset = tile_idx * SIMD_SIZE;
-        int global_idx = base_offset + tile_offset + simd_lane_id;
+    // Phase 3: Add prefix of tile sums and write out
+    for (uint tile = 0; tile < tiles_per_simdgroup; tile++) {
+        uint tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
+        uint tile_offset = tile_idx * ELEMENTS_PER_TILE;
         
         int carry = tileSums[tile_idx];
-        int final_value = sharedData[tile_offset + simd_lane_id] + carry;
         
-        if (global_idx < n) {
-            outData[global_idx] = final_value;
+        // Write ELEMENTS_PER_THREAD values per thread
+        for (uint i = 0; i < ELEMENTS_PER_THREAD; i++) {
+            uint local_idx = tile_offset + simd_lane_id * ELEMENTS_PER_THREAD + i;
+            uint global_idx = base_offset + local_idx;
+            
+            if (global_idx < n) {
+                outData[global_idx] = sharedData[local_idx] + carry;
+            }
         }
+        
+        simdgroup_barrier(mem_flags::mem_threadgroup);
     }
 }

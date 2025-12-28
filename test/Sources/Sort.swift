@@ -10,7 +10,7 @@ import Metal
 
 struct MetalTests {
     public static func sumTest() {
-        var N : Int32 = 1024
+        var N : UInt32 = 1024
         
         let device = MTLCreateSystemDefaultDevice()!
         let library = try! device.makeDefaultLibrary(bundle: .module)
@@ -18,8 +18,8 @@ struct MetalTests {
         let prefixSumFunction = library.makeFunction(name: "prefixSum")!
         let prefixSumPipeline = try! device.makeComputePipelineState(function: prefixSumFunction)
         
-        let dataSize = MemoryLayout<Int32>.stride * Int(N)
-        let data = (0..<N).map { Int32($0) }
+        let dataSize = MemoryLayout<UInt32>.stride * Int(N)
+        let data = (0..<N).map { UInt32($0) }
         let inDataBuffer = device.makeBuffer(bytes: consume data, length: dataSize, options: .storageModeShared)!
         let outDataBuffer = device.makeBuffer(length: dataSize, options: .storageModeShared)!
         
@@ -29,7 +29,7 @@ struct MetalTests {
         
         encoder.setComputePipelineState(prefixSumPipeline)
         
-        encoder.setBytes(&N, length: MemoryLayout<Int32>.size, index: 0)
+        encoder.setBytes(&N, length: MemoryLayout<UInt32>.size, index: 0)
         encoder.setBuffer(inDataBuffer, offset: 0, index: 1)
         encoder.setBuffer(outDataBuffer, offset: 0, index: 2)
         
@@ -39,7 +39,7 @@ struct MetalTests {
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         
-        let outDataBufferPtr = outDataBuffer.contents().assumingMemoryBound(to: Int32.self)
+        let outDataBufferPtr = outDataBuffer.contents().assumingMemoryBound(to: UInt32.self)
         
         for i in 0..<N {
             print("\(i): \(outDataBufferPtr[Int(i)])")

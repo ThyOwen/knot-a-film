@@ -1,0 +1,5 @@
+{
+    "plugin-logging": true,
+    "include-dependencies": true,
+    "verbose-logging": true,
+}

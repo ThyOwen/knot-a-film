@@ -1,9 +1,4 @@
-//
-//  vertex.metal
-//  Knot a Film
-//
-//  Created by Owen O'Malley on 2/17/25.
-//
+#if defined(__METAL_VERSION__)
 
 #include <metal_stdlib>
 #include "SharedWithMetal.h"
@@ -51,3 +46,5 @@ vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
 fragment float4 fragmentNode(float2 pointCoord [[point_coord]]) {
     return float4(0.8, 0.2, 0.2, 1.0);
 }
+
+#endif

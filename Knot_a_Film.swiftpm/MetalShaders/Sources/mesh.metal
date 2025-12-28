@@ -1,5 +1,9 @@
+
+#ifdef __METAL_VERSION__
+
 #include <metal_stdlib>
 #include "SharedWithMetal.h"
+
 using namespace metal;
 
 struct BodyPayload {
@@ -110,3 +114,5 @@ fragment float4 fragmentBody(FragmentIn in [[stage_in]],
                              float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
 }
+
+#endif
