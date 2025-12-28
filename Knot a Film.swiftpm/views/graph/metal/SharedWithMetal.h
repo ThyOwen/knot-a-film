@@ -5,7 +5,9 @@
     #import <Foundation/Foundation.h>
 #endif
 
-#define MAX_CONNECTIONS 512
+#define SIMDGROUP_SIZE 32
+
+#define MAX_CONNECTIONS 1024
 #define MAX_BODIES 1024
 #define MAX_NODES 349525
 

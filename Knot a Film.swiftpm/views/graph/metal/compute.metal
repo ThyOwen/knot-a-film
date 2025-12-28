@@ -288,7 +288,7 @@ kernel void constructQuadTreeKernel(device NodeData &nodeData [[buffer(0)]],
         nodeData.nodes[nodeIndex] = curNode;
     }
     
-    //threadgroup_barrier(mem_flags::mem_threadgroup);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     
     if (nodeIndex >= uint(leafLimit) || start == end) {
         for (int i = start; i <= end; ++i) {
@@ -505,6 +505,7 @@ inline void computeDirectSumForce( const device BodyData& bodyData,
     bi.acceleration += force;
 }
 
+// should also sort
 inline void computeConnectionsForce( const device BodyData& bodyData,
                                      thread Body& bi,
                                      thread PerBodyConnectionsData& bConnections,
@@ -519,7 +520,7 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
     
     float2 force = { 0.0f, 0.0f };
     
-    for (uint base = 0; base < bConnections.numPerBodyConnections; base += 32) {
+    for (int base = 0; base < (int)bConnections.numPerBodyConnections; base += 32) {
         uint localIdx = base + simd_lane_id;
         
         Body bj;
@@ -531,7 +532,7 @@ inline void computeConnectionsForce( const device BodyData& bodyData,
             bj.mass = 0.0f;
         }
         
-        for (uint lane = 0; lane < 32 && (base + lane) < bConnections.numPerBodyConnections; ++lane) {
+        for (int lane = 0; lane < 32 && (base + lane) < (int)bConnections.numPerBodyConnections; ++lane) {
             float2 pos = simd_broadcast(bj.position, lane);
             
             float2 delta = pos - bi.position;
@@ -598,6 +599,14 @@ kernel void computeForceKernel( constant const NodeData &nodeData [[buffer(0)]],
 EDGE
 ----------------------------------------------------------------------------------------
 */
+
+kernel void sortConnectionsIndicies( constant const NodeData &nodeData [[buffer(0)]],
+                                     constant const ConnectionsData& connectionsData [[buffer(1)]],
+                                     device BodyData &bodyData [[buffer(2)]] )
+{
+    
+}
+
 kernel void coalesceConnectionsIndices( device const uint2* __restrict__ connections  [[buffer(0)]],
                                         device ConnectionsData& connectionsData [[buffer(1)]],
                                         constant uint& numConnections  [[buffer(2)]],

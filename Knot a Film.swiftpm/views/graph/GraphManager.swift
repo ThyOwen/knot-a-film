@@ -40,10 +40,13 @@ import SharedWithMetal
 
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[..<100])
+        let movies = Array(moviesTotal)
+        
         
         var perBodyConnectionsDataArray : [PerBodyConnectionsData] = .init(repeating: .init(), count: movies.count)
         var numConnections : Int32 = 0
+        
+        var heighestNumConnections = 0
                         
         for (aIdx, movieA) in movies.enumerated() {
             var perBodyConnectionsData = PerBodyConnectionsData()
@@ -66,11 +69,14 @@ import SharedWithMetal
             }
             
             if appendIdx > 0 {
+                heighestNumConnections = heighestNumConnections < appendIdx ? appendIdx : heighestNumConnections
                 perBodyConnectionsData.numPerBodyConnections = uint(appendIdx)
                 perBodyConnectionsDataArray[aIdx] = perBodyConnectionsData
                 numConnections += 1
             }
         }
+        
+        print(heighestNumConnections)
         
         let renderer = GraphRenderer.init(perBodyConnections: perBodyConnectionsDataArray, numConnections: UInt32(numConnections))
         return Self.init(movies, moviePeople, renderer)

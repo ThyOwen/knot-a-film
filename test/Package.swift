@@ -13,7 +13,7 @@ let package = Package(
             name: "MetalTest",
             resources: [
                 .process("shaders.metal"),
-                .process("sdf.metal")
+                .process("sort.metal")
             ]
         ),
     ]

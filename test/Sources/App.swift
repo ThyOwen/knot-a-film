@@ -8,8 +8,10 @@ import CoreML
         WindowGroup {
             //MetalView()
             //NBodyView()
-            SDFView()
-            
+            Circle()
+                .onAppear {
+                    MetalTests.swiftSumTest()
+                }
         }
     }
 }

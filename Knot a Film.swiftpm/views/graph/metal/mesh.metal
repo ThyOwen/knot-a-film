@@ -29,7 +29,6 @@ struct FragmentIn {
 using PointMeshType = metal::mesh<PointVertexOut, PrimOut, 256, 256, metal::topology::point>;
 using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::line>;
 
-
 [[object]] void objectShader(object_data BodyPayload& payload [[payload]],
                              mesh_grid_properties meshGridProperties,
                              constant BodyData& bodyData [[buffer(0)]],
@@ -64,8 +63,8 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 
 
 [[mesh]] void meshPointShader(PointMeshType output,
-                            const object_data BodyPayload& payload [[payload]],
-                            uint tid [[thread_index_in_threadgroup]])
+                              const object_data BodyPayload& payload [[payload]],
+                              ushort tid [[thread_index_in_threadgroup]])
 {
     output.set_primitive_count(1);
     PointVertexOut v;
@@ -84,6 +83,8 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                              ushort tid [[thread_index_in_threadgroup]])
 {
     output.set_primitive_count(payload.numConnections);
+    
+    
 
     for (uint i = 0; i < payload.numConnections; i++) {
         // start of the line

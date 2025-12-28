@@ -425,7 +425,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         commandBuffer.waitUntilCompleted()
         
         //self.printPerBodyConnectionIdx()
-        self.printBodies()
+        // self.printBodies()
         
     }
     
