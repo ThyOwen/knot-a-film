@@ -29,9 +29,9 @@ struct MetalTests {
         
         encoder.setComputePipelineState(prefixSumPipeline)
         
-        encoder.setBytes(&N, length: MemoryLayout<UInt32>.size, index: 0)
-        encoder.setBuffer(inDataBuffer, offset: 0, index: 1)
-        encoder.setBuffer(outDataBuffer, offset: 0, index: 2)
+        encoder.setBuffer(inDataBuffer, offset: 0, index: 0)
+        encoder.setBuffer(outDataBuffer, offset: 0, index: 1)
+        encoder.setBytes(&N, length: MemoryLayout<UInt32>.size, index: 2)
         
         let gridSize = MTLSize(width: 1, height: 1, depth: 1)
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: MTLSize(width: 32, height: 1, depth: 1))
@@ -47,6 +47,53 @@ struct MetalTests {
 
 
     }
+    
+    public static func sumGlobalTest() {
+        var N : UInt32 = 1024
+        
+        let device = MTLCreateSystemDefaultDevice()!
+        let library = try! device.makeDefaultLibrary(bundle: .module)
+
+        let prefixSumFunction = library.makeFunction(name: "prefixGlobalSum")!
+        let prefixSumPipeline = try! device.makeComputePipelineState(function: prefixSumFunction)
+        
+        let dataSize = MemoryLayout<UInt32>.stride * Int(N)
+        let data = (0..<N).map { UInt32($0) }
+        let inDataBuffer = device.makeBuffer(bytes: consume data, length: dataSize, options: .storageModeShared)!
+        let outDataBuffer = device.makeBuffer(length: dataSize, options: .storageModeShared)!
+        
+        let commandBuffer = device.makeCommandQueue()!.makeCommandBuffer()!
+        
+        let encoder = commandBuffer.makeComputeCommandEncoder()!
+        
+        encoder.setComputePipelineState(prefixSumPipeline)
+        
+        encoder.setBuffer(inDataBuffer, offset: 0, index: 0)
+        encoder.setBuffer(outDataBuffer, offset: 0, index: 1)
+        encoder.setBytes(&N, length: MemoryLayout<UInt32>.size, index: 2)
+
+        
+        let threadsPerThreadgroup = 32
+        let threadgroupCount = (Int(N) + threadsPerThreadgroup - 1) / threadsPerThreadgroup
+
+        let tgSize = MTLSize(width: threadsPerThreadgroup, height: 1, depth: 1)
+        let gridSize = MTLSize(width: threadgroupCount, height: 1, depth: 1)
+        
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: tgSize)
+        
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        
+        let outDataBufferPtr = outDataBuffer.contents().assumingMemoryBound(to: UInt32.self)
+        
+        for i in 0..<N {
+            print("\(i): \(outDataBufferPtr[Int(i)])")
+        }
+
+
+    }
+    
     
     public static func swiftSumTest() {
         func blellochScan(_ a: inout [Int]) {

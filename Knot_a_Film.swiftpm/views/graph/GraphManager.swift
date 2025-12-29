@@ -14,7 +14,7 @@ import SharedWithMetal
 
 @Observable
 @MainActor public class GraphManager {
-
+    
     public let renderer : GraphRenderer
     
     public let nodes : [MovieDTO]
@@ -23,7 +23,7 @@ import SharedWithMetal
     public var userTranslate : UnitPoint = .center
     public var userZoom : CGFloat = 1
     public var userZoomCenter : UnitPoint = .zero
-        
+    
     public let isCircularized : Bool = false
     
     
@@ -34,23 +34,21 @@ import SharedWithMetal
         self.edges = moviePeople
         self.renderer = renderer
     }
-
-    @MainActor
-    public static func create(with databaseActor : MovieDatabaseActor) async throws -> Self {
-
+    
+    @MainActor public static func create(with databaseActor : MovieDatabaseActor) async throws -> Self {
+        
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal)
+        let movies = Array(moviesTotal[..<10])
         
+        var flatConnections: [UInt32] = []
+        var offsets: [UInt32] = [0]
+        var totalConnections: UInt32 = 0
         
-        var perBodyConnectionsDataArray : [PerBodyConnectionsData] = .init(repeating: .init(), count: movies.count)
-        var numConnections : Int32 = 0
+        var highestNumConnections = 0
         
-        var heighestNumConnections = 0
-                        
         for (aIdx, movieA) in movies.enumerated() {
-            var perBodyConnectionsData = PerBodyConnectionsData()
-            var appendIdx : Int = 0
+            var connectionCount = 0
             
             for (bIdx, movieB) in movies.enumerated() {
                 if bIdx == aIdx { continue }
@@ -61,24 +59,23 @@ import SharedWithMetal
                 let isEdge = hasSharedActors || hasSharedDirectors || hasSharedWriters
                 
                 if isEdge {
-                    withUnsafeMutablePointer(to: &perBodyConnectionsData.perBodyConnections.0) { pointer in
-                        pointer.advanced(by: appendIdx).pointee = uint(bIdx)
-                    }
-                    appendIdx += 1
+                    flatConnections.append(UInt32(bIdx))
+                    connectionCount += 1
                 }
             }
             
-            if appendIdx > 0 {
-                heighestNumConnections = heighestNumConnections < appendIdx ? appendIdx : heighestNumConnections
-                perBodyConnectionsData.numPerBodyConnections = uint(appendIdx)
-                perBodyConnectionsDataArray[aIdx] = perBodyConnectionsData
-                numConnections += 1
+            if connectionCount > 0 {
+                highestNumConnections = max(highestNumConnections, connectionCount)
+                totalConnections += 1
             }
+            
+            offsets.append(UInt32(flatConnections.count))
         }
         
-        print(heighestNumConnections)
+        print(flatConnections)
+        print(highestNumConnections)
         
-        let renderer = GraphRenderer.init(perBodyConnections: perBodyConnectionsDataArray, numConnections: UInt32(numConnections))
+        let renderer = GraphRenderer.init(connections: flatConnections, offsets: offsets, numConnections: totalConnections)
         return Self.init(movies, moviePeople, renderer)
     }
     
@@ -100,7 +97,7 @@ import SharedWithMetal
                 guard !areThereAnySharedRoles else {
                     continue//throw MovieEdgeError.noSharedMoviePeople
                 }
-                        
+                
                 guard let aIdx = aNode.positionIndex, let bIdx = bNode.positionIndex else {
                     continue// MovieEdgeError.invalidNodeIndices
                 }
@@ -116,5 +113,5 @@ import SharedWithMetal
         }
         return edges
     }
-
+    
 }

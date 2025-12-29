@@ -99,8 +99,8 @@ public struct BodyBufferGroup : MTLBufferGroup {
 
 public final class GraphRenderer : NSObject, MTKViewDelegate {
     
-    let device: MTLDevice
-    let commandQueue: MTLCommandQueue
+    let device : MTLDevice
+    let commandQueue : MTLCommandQueue
     
     private var initalizeBodiesPipeline : MTLComputePipelineState
     private var resetPipeline : MTLComputePipelineState
@@ -108,9 +108,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     private var constructTreePipeline : MTLComputePipelineState
     private var computeForcePipeline : MTLComputePipelineState
     
-    private var nodeRenderPipeline: MTLRenderPipelineState
-    private var bodyRenderPipeline: MTLRenderPipelineState
-    private var bodyLineRenderPipeline: MTLRenderPipelineState
+    private var nodeRenderPipeline : MTLRenderPipelineState
+    private var bodyRenderPipeline : MTLRenderPipelineState
+    private var bodyLineRenderPipeline : MTLRenderPipelineState
     
     private var nodeData : NodeBufferGroup
     private var bodyData : BodyBufferGroup
@@ -130,10 +130,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     private let threadgroupSize = MTLSize(width: 32, height: 1, depth: 1)
     
-    
-    public init(perBodyConnections : consuming [PerBodyConnectionsData], numConnections : UInt32) {
+    public init(connections: consuming [UInt32], offsets: consuming [UInt32], numConnections: UInt32) {
         
-        self.params = GraphParams.makeDefault(numBodies: UInt32(perBodyConnections.count), numConnections: numConnections)
+        self.params = GraphParams.makeDefault(numBodies: UInt32(offsets.count - 1), numConnections: numConnections)
         
         
         let device = MTLCreateSystemDefaultDevice()!
@@ -151,15 +150,21 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
         self.connectionsBuffer = device.makeBuffer(length: MemoryLayout<ConnectionsData>.stride, options: .storageModeShared)!
         let connectionsDataPointer = connectionsBuffer.contents().bindMemory(to: ConnectionsData.self, capacity: 1)
-        
-        withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.connections.0) { connectionsPointer in
-            for (i, perBodyConnection) in perBodyConnections.enumerated() {
-                connectionsPointer.advanced(by: i).pointee = perBodyConnection
+
+        withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.connections.0) { connectionsPtr in
+            for (i, connection) in connections.enumerated() {
+                connectionsPtr.advanced(by: i).pointee = connection
             }
         }
         
-        connectionsDataPointer.pointee.numConnections = uint(numConnections)
-        print("Initialized \(numConnections) connections")
+        withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.offsets.0) { offsetsPtr in
+            for (i, offset) in offsets.enumerated() {
+                offsetsPtr.advanced(by: i).pointee = offset
+            }
+        }
+
+        connectionsDataPointer.pointee.numConnections = numConnections
+        print("Initialized \(numConnections) connections with \(connections.count) total edges")
         
         let mutexSize = MemoryLayout<Int32>.stride * Int(self.params.numNodes)
         self.mutexBuffer = device.makeBuffer(length: mutexSize, options: .storageModePrivate)!
@@ -173,9 +178,6 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let bundle = Bundle(url: shadersBundleURL)!
         let libraryURL = bundle.url(forResource: "debug", withExtension: "metallib")!
         let library = try! device.makeLibrary(URL: libraryURL)
-        
-        //let library = try! device.makeDefaultLibrary(bundle: .main)
-
         
         print(library)
         
@@ -224,7 +226,6 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.device = device
         super.init()
     }
-    
     private func initalizeBodies(commandBuffer : borrowing MTLCommandBuffer) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
@@ -361,7 +362,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.nodeData.bottomRightBuffer, offset: 0, index: Int(NODE_BOTTOM_RIGHT_IDX))
         encoder.setBuffer(self.nodeData.centerOfMassBuffer, offset: 0, index: Int(NODE_CENTER_OF_MASS_IDX))
         encoder.setBuffer(self.nodeData.isLeafBuffer, offset: 0, index: Int(NODE_IS_LEAF_IDX))
-        encoder.setBuffer(connectionsBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
+        encoder.setBuffer(self.connectionsBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
         encoder.setBuffer(self.bodyData.massBuffer, offset: 0, index: Int(BODY_MASS_IDX))
         encoder.setBuffer(self.bodyData.radiusBuffer, offset: 0, index: Int(BODY_RADIUS_IDX))
         encoder.setBuffer(self.bodyData.positionBuffer, offset: 0, index: Int(BODY_POSITION_IDX))

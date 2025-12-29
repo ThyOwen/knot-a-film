@@ -124,15 +124,9 @@ using NodeMemberDataFloat = NodeMemberData<float>;
 using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
 using NodeMemberDataBool = NodeMemberData<bool>;
 
-
-
-struct PerBodyConnectionsData {
-    uint32_t perBodyConnections[MAX_CONNECTIONS];
-    uint32_t numPerBodyConnections;
-};
-
 struct ConnectionsData {
-    struct PerBodyConnectionsData connections[MAX_BODIES];
+    //uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
+    uint32_t connections[MAX_CONNECTIONS];
+    uint32_t offsets[MAX_BODIES + 1];
     uint32_t numConnections;
 };
-

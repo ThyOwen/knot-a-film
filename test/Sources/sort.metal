@@ -12,12 +12,12 @@ using namespace metal;
 #define ARRAY_SIZE 1024
 #define SIMD_SIZE 32
 #define ELEMENTS_PER_THREAD 4
-#define ELEMENTS_PER_TILE (SIMD_SIZE * ELEMENTS_PER_THREAD)
-#define TILES_PER_THREADGROUP (ARRAY_SIZE / ELEMENTS_PER_TILE)
+#define ELEMENTS_PER_SIMD (SIMD_SIZE * ELEMENTS_PER_THREAD)
+#define TILES_PER_THREADGROUP (ARRAY_SIZE / ELEMENTS_PER_SIMD)
 
-kernel void prefixSum(constant uint& n [[buffer(0)]],
-                      device const int* inData [[buffer(1)]],
+kernel void prefixSum(device const int* inData [[buffer(1)]],
                       device int* outData [[buffer(2)]],
+                      constant uint& n [[buffer(0)]],
                       uint simdgroup_id [[simdgroup_index_in_threadgroup]],
                       uint simd_lane_id [[thread_index_in_simdgroup]],
                       uint threads_per_threadgroup [[threads_per_threadgroup]],
@@ -33,7 +33,7 @@ kernel void prefixSum(constant uint& n [[buffer(0)]],
     // simdgroup assigned tiles
     for (uint tile = 0; tile < tiles_per_simdgroup; tile++) {
         uint tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
-        uint tile_offset = tile_idx * ELEMENTS_PER_TILE;
+        uint tile_offset = tile_idx * ELEMENTS_PER_SIMD;
         
         int values[ELEMENTS_PER_THREAD];
         int thread_sum = 0;
@@ -88,7 +88,7 @@ kernel void prefixSum(constant uint& n [[buffer(0)]],
     // add prefix of tile sums to each element and write out
     for (uint tile = 0; tile < tiles_per_simdgroup; tile++) {
         uint tile_idx = simdgroup_id * tiles_per_simdgroup + tile;
-        uint tile_offset = tile_idx * ELEMENTS_PER_TILE;
+        uint tile_offset = tile_idx * ELEMENTS_PER_SIMD;
         
         int carry = tileSums[tile_idx];
         
@@ -102,5 +102,76 @@ kernel void prefixSum(constant uint& n [[buffer(0)]],
         }
         
         simdgroup_barrier(mem_flags::mem_threadgroup);
+    }
+}
+
+#define THREADS_PER_THREADGROUP 32
+#define SIMDGROUPS_PER_TG (THREADS_PER_THREADGROUP / SIMD_SIZE)
+#define ELEMENTS_PER_TG (THREADS_PER_THREADGROUP * ELEMENTS_PER_THREAD)
+
+kernel void prefixGlobalSum( device const int* inData [[buffer(0)]],
+                             device int*       outData [[buffer(1)]],
+                             constant uint&    n [[buffer(2)]],
+
+                             uint tid [[thread_index_in_threadgroup]],
+                             uint lane [[thread_index_in_simdgroup]],
+                             uint simd_id  [[simdgroup_index_in_threadgroup]],
+                             uint tg_id  [[threadgroup_position_in_grid]]
+)
+{
+    threadgroup int shared[ELEMENTS_PER_TG];
+    threadgroup int simdSums[SIMDGROUPS_PER_TG];
+
+    const uint base = tg_id * ELEMENTS_PER_TG;
+    const uint local_base = tid * ELEMENTS_PER_THREAD;
+
+    // simdgroup assigned tiles
+    int vals[ELEMENTS_PER_THREAD];
+    int sum = 0;
+
+    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+        uint idx = base + local_base + i;
+        vals[i] = (idx < n) ? inData[idx] : 0;
+        sum += vals[i];
+    }
+
+    int simd_offset = simd_prefix_exclusive_sum(sum);
+
+    int running = simd_offset;
+    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+        shared[local_base + i] = running;
+        running += vals[i];
+    }
+
+    int simd_total = simd_sum(sum);
+
+    if (lane == 0) {
+        simdSums[simd_id] = simd_total;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // scan the tile sums to get prefix sums
+    if (simd_id == 0) {
+        int val = (lane < SIMDGROUPS_PER_TG) ? simdSums[lane] : 0;
+        int scanned = simd_prefix_exclusive_sum(val);
+
+        if (lane < SIMDGROUPS_PER_TG) {
+            simdSums[lane] = scanned;
+        }
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    // add prefix of tile sums to each element and write out
+    int carry = simdSums[simd_id];
+
+    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+        uint local_idx = local_base + i;
+        uint global_idx = base + local_idx;
+
+        if (global_idx < n) {
+            outData[global_idx] = shared[local_idx] + carry;
+        }
     }
 }

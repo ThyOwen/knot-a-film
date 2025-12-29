@@ -29,7 +29,7 @@ kernel void initalizeBodies(device BodyMemberData<float>& mass [[buffer(BODY_MAS
                             device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                             device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                             device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
-                            constant PhysicsParams& params [[buffer(22)]],
+                            constant PhysicsParams& params [[buffer(CONNECTIONS_IDX)]],
                             uint gid [[thread_position_in_grid]])
 {
     if (gid >= numBodies) {
@@ -54,15 +54,28 @@ kernel void initalizeBodies(device BodyMemberData<float>& mass [[buffer(BODY_MAS
     initialIdx.data[gid] = gid;
 }
 
-kernel void resetKernel(device NodeMemberData<float2>& topLeft [[buffer(NODE_TOP_LEFT_IDX)]],
-                        device NodeMemberData<float2>& bottomRight [[buffer(NODE_BOTTOM_RIGHT_IDX)]],
-                        device NodeMemberData<float2>& centerOfMass [[buffer(NODE_CENTER_OF_MASS_IDX)]],
-                        device NodeMemberData<float>& totalMass [[buffer(NODE_TOTAL_MASS_IDX)]],
-                        device NodeMemberData<uint>& start [[buffer(NODE_START_IDX)]],
-                        device NodeMemberData<uint>& end [[buffer(NODE_END_IDX)]],
-                        device NodeMemberData<bool>& isLeaf [[buffer(NODE_IS_LEAF_IDX)]],
-                        device atomic_int *mutex [[buffer(MUTEX_IDX)]],
-                        uint gid [[thread_position_in_grid]])
+kernel void intializeConnections( const device uint* __restrict connections  [[buffer(0)]],
+                                  const device uint* __restrict offsets  [[buffer(1)]],
+                                  device ConnectionsData& connectionsData  [[buffer(CONNECTIONS_IDX)]],
+                                  uint gid  [[thread_position_in_grid]]
+) {
+    if (gid >= numConnections) {
+        return;
+    }
+
+    
+    
+}
+
+kernel void resetKernel(device NodeMemberData<float2>& topLeft  [[buffer(NODE_TOP_LEFT_IDX)]],
+                        device NodeMemberData<float2>& bottomRight  [[buffer(NODE_BOTTOM_RIGHT_IDX)]],
+                        device NodeMemberData<float2>& centerOfMass  [[buffer(NODE_CENTER_OF_MASS_IDX)]],
+                        device NodeMemberData<float>& totalMass  [[buffer(NODE_TOTAL_MASS_IDX)]],
+                        device NodeMemberData<uint>& start  [[buffer(NODE_START_IDX)]],
+                        device NodeMemberData<uint>& end  [[buffer(NODE_END_IDX)]],
+                        device NodeMemberData<bool>& isLeaf  [[buffer(NODE_IS_LEAF_IDX)]],
+                        device atomic_int *mutex  [[buffer(MUTEX_IDX)]],
+                        uint gid  [[thread_position_in_grid]])
 {
     if (gid < uint(topLeft.numInstances)) {
         topLeft.data[gid] = {INFINITY, -INFINITY};
@@ -514,8 +527,7 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
 inline void computeConnectionsForce(device BodyMemberData<float2>& position,
                                     float2 bodyPos,
                                     thread float2& bodyAccel,
-                                    thread PerBodyConnectionsData& bConnections,
-                                    constant uint& numBodiesWithConnections,
+                                    constant ConnectionsData& connectionsData,
                                     constant PhysicsParams &physics,
                                     uint gid,
                                     ushort simd_lane_id)
@@ -524,20 +536,24 @@ inline void computeConnectionsForce(device BodyMemberData<float2>& position,
         return;
     }
     
+    uint startIdx = connectionsData.offsets[gid];
+    uint endIdx = connectionsData.offsets[gid + 1];
+    uint numConns = endIdx - startIdx;
+    
     float2 force = { 0.0f, 0.0f };
     
-    for (int base = 0; base < (int)bConnections.numPerBodyConnections; base += 32) {
+    for (int base = 0; base < (int)numConns; base += 32) {
         uint localIdx = base + simd_lane_id;
         
         float2 otherPos;
-        if (localIdx < bConnections.numPerBodyConnections) {
-            uint connectionIdx = bConnections.perBodyConnections[localIdx];
+        if (localIdx < numConns) {
+            uint connectionIdx = connectionsData.connections[startIdx + localIdx];
             otherPos = position.data[connectionIdx];
         } else {
             otherPos = { 0.0f, 0.0f };
         }
         
-        for (int lane = 0; lane < 32 && (base + lane) < (int)bConnections.numPerBodyConnections; ++lane) {
+        for (int lane = 0; lane < 32 && (base + lane) < (int)numConns; ++lane) {
             float2 pos = simd_broadcast(otherPos, lane);
             
             float2 delta = pos - bodyPos;
@@ -562,9 +578,9 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
                                constant NodeMemberData<float2>& centerOfMass [[buffer(NODE_CENTER_OF_MASS_IDX)]],
                                constant NodeMemberData<bool>& isLeaf [[buffer(NODE_IS_LEAF_IDX)]],
                                constant ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
-                                device BodyMemberData<float>& mass [[buffer(BODY_MASS_IDX)]],
-                                device BodyMemberData<float>& radius [[buffer(BODY_RADIUS_IDX)]],
-                                device BodyMemberData<float2>& position [[buffer(BODY_POSITION_IDX)]],
+                               device BodyMemberData<float>& mass [[buffer(BODY_MASS_IDX)]],
+                               device BodyMemberData<float>& radius [[buffer(BODY_RADIUS_IDX)]],
+                               device BodyMemberData<float2>& position [[buffer(BODY_POSITION_IDX)]],
                                device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                                device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                                device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
@@ -593,8 +609,7 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
     }
     
     if (computeConnections && gid < connectionsData.numConnections) {
-        thread PerBodyConnectionsData bConnections = connectionsData.connections[gid];
-        computeConnectionsForce(position, bodyPos, bodyAccel, bConnections, connectionsData.numConnections, physics, gid, simd_lane_id);
+        computeConnectionsForce(position, bodyPos, bodyAccel, connectionsData, physics, gid, simd_lane_id);
     }
     
     bodyVel *= physics.damping;

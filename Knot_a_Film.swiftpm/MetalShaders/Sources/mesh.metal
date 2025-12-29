@@ -49,11 +49,14 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     
     biPosition = (biPosition * transform.scale) + transform.offset;
     
-    if (connectionsData.numConnections != 0) {
-        PerBodyConnectionsData data = connectionsData.connections[gid];
-        payload.numConnections = data.numPerBodyConnections;
-        for (int i = 0; i < (int)data.numPerBodyConnections; i++) {
-            uint idx = data.perBodyConnections[i];
+    if (connectionsData.numConnections != 0 && gid < bodyPositionsData.numInstances) {
+        uint startIdx = connectionsData.offsets[gid];
+        uint endIdx = connectionsData.offsets[gid + 1];
+        uint numConns = endIdx - startIdx;
+        
+        payload.numConnections = numConns;
+        for (int i = 0; i < (int)numConns; i++) {
+            uint idx = connectionsData.connections[startIdx + i];
             float2 termination = (bodyPositionsData.data[idx] * transform.scale) + transform.offset;
             float2 midpoint = termination - biPosition;
             payload.connections[i] = midpoint;

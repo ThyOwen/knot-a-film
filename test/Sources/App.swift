@@ -10,7 +10,7 @@ import CoreML
             //NBodyView()
             Circle()
                 .onAppear {
-                    MetalTests.sumTest()
+                    MetalTests.sumGlobalTest()
                 }
         }
     }

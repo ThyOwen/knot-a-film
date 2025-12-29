@@ -24,7 +24,7 @@ extension GraphParams {
         
         p.blockSize = 32
         p.useBarnes = true
-        p.computeConnections = true
+        p.computeConnections = false
         
         p.physics.springConstant = 1.0
         p.physics.edgeRepulsion = 1.0
