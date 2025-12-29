@@ -35,25 +35,26 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 
 [[object]] void objectShader(object_data BodyPayload& payload [[payload]],
                              mesh_grid_properties meshGridProperties,
-                             constant BodyData& bodyData [[buffer(0)]],
-                             constant ScreenTransform& transform [[buffer(1)]],
-                             constant ConnectionsData& connectionsData [[buffer(2)]],
+                             constant BodyMemberData<float2>& bodyPositionsData [[buffer(BODY_POSITION_IDX)]],
+                             constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
+                             constant ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
                              uint gid [[thread_position_in_grid]])
 {
-    if (gid >= bodyData.numBodies) {
+
+    if (gid >= bodyPositionsData.numInstances) {
         return;
     }
     
-    thread Body bi = bodyData.bodies[gid];
+    thread float2 biPosition = bodyPositionsData.data[gid];
     
-    float2 biPosition = (bi.position * transform.scale) + transform.offset;
+    biPosition = (biPosition * transform.scale) + transform.offset;
     
     if (connectionsData.numConnections != 0) {
         PerBodyConnectionsData data = connectionsData.connections[gid];
         payload.numConnections = data.numPerBodyConnections;
         for (int i = 0; i < (int)data.numPerBodyConnections; i++) {
             uint idx = data.perBodyConnections[i];
-            float2 termination = (bodyData.bodies[idx].position * transform.scale) + transform.offset;
+            float2 termination = (bodyPositionsData.data[idx] * transform.scale) + transform.offset;
             float2 midpoint = termination - biPosition;
             payload.connections[i] = midpoint;
         }

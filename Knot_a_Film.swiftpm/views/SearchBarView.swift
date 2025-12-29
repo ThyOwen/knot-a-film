@@ -1,5 +1,5 @@
 //
-//  SwiftUIView.swift
+//  SearchBarView.swift
 //  Knot a Film
 //
 //  Created by Owen O'Malley on 2/19/25.

@@ -10,8 +10,9 @@ struct VertexOut {
     float  pointSize [[point_size]];
 };
 
-vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
-                            constant ScreenTransform& transform [[ buffer(1) ]],
+vertex VertexOut vertexNode(constant NodeMemberData<float2>& topLeftData [[buffer(NODE_TOP_LEFT_IDX)]],
+                            constant NodeMemberData<float2>& bottomRightData [[buffer(NODE_BOTTOM_RIGHT_IDX)]],
+                            constant ScreenTransform& transform [[ buffer(SCREEN_TRANSFORM_IDX) ]],
                             uint vertexId [[ vertex_id ]]) {
     //Node node = nodes[vid];
     
@@ -19,14 +20,12 @@ vertex VertexOut vertexNode(device const NodeData& nodeData [[ buffer(0)]],
     
     uint nodeIndex = vertexId / 8;
     uint corner    = vertexId % 8;
+        
+    float2 topLeft = topLeftData.data[nodeIndex];
+    float2 bottomRight = bottomRightData.data[nodeIndex];
     
-    Node node = nodeData.nodes[nodeIndex];
-    
-    float2 topLeft = node.topLeft;
-    float2 bottomRight = node.bottomRight;
-    
-    float2 topRight = { node.bottomRight.x, node.topLeft.y };
-    float2 bottomLeft = { node.topLeft.x, node.bottomRight.y };
+    float2 topRight = { bottomRight.x, topLeft.y };
+    float2 bottomLeft = { topLeft.x, bottomRight.y };
 
     // The 2 triangles that make a box
     float2 corners[8] = {

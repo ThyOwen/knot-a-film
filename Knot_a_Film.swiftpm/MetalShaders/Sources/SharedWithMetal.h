@@ -1,8 +1,9 @@
 #pragma once
 
 #include <simd/simd.h>
+
 #ifndef __METAL_VERSION__
-    #import <Foundation/Foundation.h>
+    #include <cstdint>
 #endif
 
 #define SIMDGROUP_SIZE 32
@@ -10,6 +11,8 @@
 #define MAX_CONNECTIONS 1024
 #define MAX_BODIES 1024
 #define MAX_NODES 349525
+
+//MARK: Function Constant Indices
 
 #define FC_NUM_BODIES           0
 #define FC_NUM_CONNECTIONS      1
@@ -28,6 +31,39 @@
 #define FC_COLLISION_THRESHOLD  14
 #define FC_DAMPING              15
 
+//MARK: Node Buffer Indices
+
+#define NODE_TOP_LEFT_IDX           0
+#define NODE_BOTTOM_RIGHT_IDX       1
+#define NODE_CENTER_OF_MASS_IDX     2
+#define NODE_TOTAL_MASS_IDX         3
+#define NODE_START_IDX              4
+#define NODE_END_IDX                5
+#define NODE_IS_LEAF_IDX            6
+
+//MARK: Body Buffer Indices
+
+#define BODY_MASS_IDX               7
+#define BODY_RADIUS_IDX             8
+#define BODY_POSITION_IDX           9
+#define BODY_VELOCITY_IDX           10
+#define BODY_ACCELERATION_IDX       11
+#define BODY_INITIAL_IDX_IDX        12
+
+#define BODY_MASS_ALT_IDX           13
+#define BODY_RADIUS_ALT_IDX         14
+#define BODY_POSITION_ALT_IDX       15
+#define BODY_VELOCITY_ALT_IDX       16
+#define BODY_ACCELERATION_ALT_IDX   17
+#define BODY_INITIAL_IDX_ALT_IDX    18
+
+//MARK: Other Buffer Indices
+
+#define CONNECTIONS_IDX             19
+#define MUTEX_IDX                   20
+#define SCREEN_TRANSFORM_IDX        21
+#define PHYSICS_PARAMS_IDX          22
+
 struct ScreenTransform {
     simd_float2 offset;
     simd_float2 scale;
@@ -45,11 +81,11 @@ struct PhysicsParams {
 };
 
 struct GraphParams {
-    uint maxDepth;
-    uint numBodies;
-    uint numConnections;
-    uint numNodes;
-    uint leafLimit;
+    uint32_t maxDepth;
+    uint32_t numBodies;
+    uint32_t numConnections;
+    uint32_t numNodes;
+    uint32_t leafLimit;
 
     int blockSize;
     bool useBarnes;
@@ -58,45 +94,45 @@ struct GraphParams {
     struct PhysicsParams physics;
 };
 
-//Nodes
-struct Node {
-    simd_float2 topLeft;
-    simd_float2 bottomRight;
-    simd_float2 centerOfMass;
-    
-    float totalMass;
-    uint start;
-    uint end;
-    bool isLeaf;
+template <typename T>
+struct NodeMemberData {
+    T data[MAX_NODES];
+    uint32_t numInstances;
 };
 
-struct NodeData {
-    struct Node nodes[MAX_NODES];
-    uint numNodes;
+template <typename T>
+struct BodyMemberData {
+    T data[MAX_BODIES];
+    uint32_t numInstances;
 };
 
-//Bodies
-struct Body {
-    float mass;
-    float radius;
-    simd_float2 position;
-    simd_float2 velocity;
-    simd_float2 acceleration;
-    uint initialIdx;
-};
+template struct BodyMemberData<float>;
+template struct BodyMemberData<simd_float2>;
+template struct BodyMemberData<uint32_t>;
 
-struct BodyData {
-    struct Body bodies[MAX_BODIES];
-    uint numBodies;
-};
+template struct NodeMemberData<simd_float2>;
+template struct NodeMemberData<float>;
+template struct NodeMemberData<uint32_t>;
+template struct NodeMemberData<bool>;
 
-//Connections
+using BodyMemberDataFloat = BodyMemberData<float>;
+using BodyMemberDataFloat2 = BodyMemberData<simd_float2>;
+using BodyMemberDataUInt32 = BodyMemberData<uint32_t>;
+
+using NodeMemberDataFloat2 = NodeMemberData<simd_float2>;
+using NodeMemberDataFloat = NodeMemberData<float>;
+using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
+using NodeMemberDataBool = NodeMemberData<bool>;
+
+
+
 struct PerBodyConnectionsData {
-    uint perBodyConnections[MAX_CONNECTIONS];
-    uint numPerBodyConnections;
+    uint32_t perBodyConnections[MAX_CONNECTIONS];
+    uint32_t numPerBodyConnections;
 };
 
 struct ConnectionsData {
     struct PerBodyConnectionsData connections[MAX_BODIES];
-    uint numConnections;
+    uint32_t numConnections;
 };
+

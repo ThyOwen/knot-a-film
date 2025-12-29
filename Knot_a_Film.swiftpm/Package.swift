@@ -50,22 +50,27 @@ let package = Package(
             name: "AppModule",
             dependencies: ["MetalShaders"],
             path: ".",
-            exclude: ["MetalCompilerPlugin", "MetalShaders"],
+            exclude: ["MetalCompilerPlugin"],
             resources: [
-                .process("MetalShaders/Sources"),
+                .process("MetalShaders"),
                 .process("Resources/visuals"),
                 .copy("Resources/mlmodels")
             ],
             swiftSettings: [
-                .swiftLanguageMode(.v6)
+                .swiftLanguageMode(.v6),
+                .interoperabilityMode(.Cxx),
+                .unsafeFlags(["-cxx-interoperability-mode=default"])
             ]
         ),
         .target(
             name: "MetalShaders",
             path: "MetalShaders",
             publicHeadersPath: "include",
+            cxxSettings: [],
             plugins: ["MetalCompilerPlugin"]
         )
     ],
-    swiftLanguageVersions: [.version("6.2")]
+    swiftLanguageVersions: [.version("6.2")],
+    cLanguageStandard: .c18,
+    cxxLanguageStandard: .cxx20
 )
