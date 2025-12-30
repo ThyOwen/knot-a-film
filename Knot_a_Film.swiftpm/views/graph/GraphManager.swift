@@ -39,11 +39,11 @@ import SharedWithMetal
         
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[..<10])
+        let movies = Array(moviesTotal)
         
         var flatConnections: [UInt32] = []
-        var offsets: [UInt32] = [0]
-        var totalConnections: UInt32 = 0
+        var offsets: [UInt32] = [] // offsets is a per-body counts array; its length equals number of bodies.
+        var numOfBodiesWithConnections: UInt32 = 0
         
         var highestNumConnections = 0
         
@@ -66,15 +66,18 @@ import SharedWithMetal
             
             if connectionCount > 0 {
                 highestNumConnections = max(highestNumConnections, connectionCount)
-                totalConnections += 1
+                numOfBodiesWithConnections += 1
             }
             
-            offsets.append(UInt32(flatConnections.count))
+            offsets.append(UInt32(connectionCount))
         }
         
-        print(flatConnections)
-        print(highestNumConnections)
+        print("total connections", flatConnections)
+        print("connection offsets", offsets)
+        print("highestNumConnections", highestNumConnections)
+        print("numOfBodiesWithConnections", numOfBodiesWithConnections)
         
+        let totalConnections = UInt32(flatConnections.count)
         let renderer = GraphRenderer.init(connections: flatConnections, offsets: offsets, numConnections: totalConnections)
         return Self.init(movies, moviePeople, renderer)
     }

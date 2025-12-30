@@ -109,14 +109,14 @@ kernel void prefixSum(device const int* inData [[buffer(1)]],
 #define SIMDGROUPS_PER_TG (THREADS_PER_THREADGROUP / SIMD_SIZE)
 #define ELEMENTS_PER_TG (THREADS_PER_THREADGROUP * ELEMENTS_PER_THREAD)
 
-kernel void prefixGlobalSum( device const int* inData [[buffer(0)]],
-                             device int*       outData [[buffer(1)]],
-                             constant uint&    n [[buffer(2)]],
+kernel void prefixGlobalSum( device const int* inData        [[buffer(0)]],
+                             device int*       outData       [[buffer(1)]],
+                             constant uint&    n             [[buffer(2)]],
 
-                             uint tid [[thread_index_in_threadgroup]],
-                             uint lane [[thread_index_in_simdgroup]],
-                             uint simd_id  [[simdgroup_index_in_threadgroup]],
-                             uint tg_id  [[threadgroup_position_in_grid]]
+                             uint tid                         [[thread_index_in_threadgroup]],
+                             uint lane                        [[thread_index_in_simdgroup]],
+                             uint simd_id                     [[simdgroup_index_in_threadgroup]],
+                             uint tg_id                       [[threadgroup_position_in_grid]]
 )
 {
     threadgroup int shared[ELEMENTS_PER_TG];
@@ -151,7 +151,7 @@ kernel void prefixGlobalSum( device const int* inData [[buffer(0)]],
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // scan the tile sums to get prefix sums
+    // ---- scan simdgroup sums (single simdgroup does it) ----
     if (simd_id == 0) {
         int val = (lane < SIMDGROUPS_PER_TG) ? simdSums[lane] : 0;
         int scanned = simd_prefix_exclusive_sum(val);

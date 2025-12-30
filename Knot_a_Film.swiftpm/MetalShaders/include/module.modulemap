@@ -1,4 +1,4 @@
 module SharedWithMetal {
-    header "../Sources/SharedWithMetal.h"
+    header "../Sources/MetalShaders.h"
     requires cplusplus
 }

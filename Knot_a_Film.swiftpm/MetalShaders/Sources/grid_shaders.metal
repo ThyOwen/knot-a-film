@@ -1,7 +1,7 @@
 #if defined(__METAL_VERSION__)
 
 #include <metal_stdlib>
-#include "SharedWithMetal.h"
+#include "MetalShaders.h"
 
 using namespace metal;
 

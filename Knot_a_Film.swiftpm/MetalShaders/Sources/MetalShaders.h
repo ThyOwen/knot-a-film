@@ -125,8 +125,30 @@ using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
 using NodeMemberDataBool = NodeMemberData<bool>;
 
 struct ConnectionsData {
-    //uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
-    uint32_t connections[MAX_CONNECTIONS];
-    uint32_t offsets[MAX_BODIES + 1];
-    uint32_t numConnections;
+    uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
+    //uint32_t connections[MAX_CONNECTIONS]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
+    uint32_t offsets[MAX_BODIES];
+    uint32_t numBodiesWithConnections;
 };
+
+#ifdef __METAL_VERSION__
+
+constant uint   numBodies          [[ function_constant(FC_NUM_BODIES) ]];
+constant uint   numConnections     [[ function_constant(FC_NUM_CONNECTIONS) ]];
+constant uint   numNodes           [[ function_constant(FC_NUM_NODES) ]];
+constant uint   leafLimit          [[ function_constant(FC_LEAF_LIMIT) ]];
+
+constant int   blockSize          [[ function_constant(FC_BLOCK_SIZE) ]];
+constant bool  useBarnes          [[ function_constant(FC_USE_BARNES) ]];
+constant bool  computeConnections [[ function_constant(FC_COMPUTE_CONNECTIONS) ]];
+
+constant float springConstant     [[ function_constant(FC_SPRING_CONSTANT) ]];
+constant float edgeRepulsion      [[ function_constant(FC_EDGE_REPULSION) ]];
+constant float edgeAttraction     [[ function_constant(FC_EDGE_ATTRACTION) ]];
+constant float epsilon            [[ function_constant(FC_EPSILON) ]];
+constant float dt                 [[ function_constant(FC_DT) ]];
+constant float theta              [[ function_constant(FC_THETA) ]];
+constant float collisionThreshold [[ function_constant(FC_COLLISION_THRESHOLD) ]];
+constant float damping            [[ function_constant(FC_DAMPING) ]];
+
+#endif

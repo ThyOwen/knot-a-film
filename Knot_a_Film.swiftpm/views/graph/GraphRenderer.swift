@@ -102,6 +102,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     let device : MTLDevice
     let commandQueue : MTLCommandQueue
     
+    private var initalizeConnectionsPipeline : MTLComputePipelineState
     private var initalizeBodiesPipeline : MTLComputePipelineState
     private var resetPipeline : MTLComputePipelineState
     private var boundingBoxPipeline : MTLComputePipelineState
@@ -120,6 +121,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     private var transformBuffer : MTLBuffer
     
     public var connectionsBuffer : MTLBuffer
+    public var offsetsBuffer : MTLBuffer
+    
+    public var connectionsDataBuffer : MTLBuffer
     
     var idxes : [UInt32] = []
     
@@ -132,8 +136,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     public init(connections: consuming [UInt32], offsets: consuming [UInt32], numConnections: UInt32) {
         
-        self.params = GraphParams.makeDefault(numBodies: UInt32(offsets.count - 1), numConnections: numConnections)
-        
+        self.params = GraphParams.makeDefault(numBodies: UInt32(offsets.count), numConnections: numConnections)
         
         let device = MTLCreateSystemDefaultDevice()!
         
@@ -148,24 +151,31 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let numNodes = UInt32(self.params.numNodes)
         self.nodeData = NodeBufferGroup.makeBuffers(numInstances: numNodes, device: device, options: .storageModeShared)
 
-        self.connectionsBuffer = device.makeBuffer(length: MemoryLayout<ConnectionsData>.stride, options: .storageModeShared)!
-        let connectionsDataPointer = connectionsBuffer.contents().bindMemory(to: ConnectionsData.self, capacity: 1)
+        self.connectionsDataBuffer = device.makeBuffer(length: MemoryLayout<ConnectionsData>.stride, options: .storageModeShared)!
+        let connectionsDataPointer = connectionsDataBuffer.contents().bindMemory(to: ConnectionsData.self, capacity: 1)
+        let numBodiesWithConnections = UInt32(offsets.count)
+        connectionsDataPointer.pointee.numBodiesWithConnections = numBodiesWithConnections
 
-        withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.connections.0) { connectionsPtr in
-            for (i, connection) in connections.enumerated() {
-                connectionsPtr.advanced(by: i).pointee = connection
-            }
+        #if DEBUG
+        if Int(numConnections) > MAX_CONNECTIONS * MAX_BODIES {
+            print("Warning: total connections (\(numConnections)) exceed MAX_CONNECTIONS (\(MAX_CONNECTIONS * MAX_BODIES)). Clamping may be required.")
         }
-        
+        if offsets.count > MAX_BODIES {
+            print("Warning: number of bodies (\(offsets.count)) exceed MAX_BODIES (\(MAX_BODIES)).")
+        }
+        #endif
+
+        // Write sentinel at offsets[numBodies] = total number of flattened connections so mesh shaders
+        // can safely read offsets[gid+1]. Also perform basic bounds checks against Metal header limits.
         withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.offsets.0) { offsetsPtr in
-            for (i, offset) in offsets.enumerated() {
-                offsetsPtr.advanced(by: i).pointee = offset
-            }
+            offsetsPtr.advanced(by: Int(numBodiesWithConnections)).pointee = numConnections
         }
 
-        connectionsDataPointer.pointee.numConnections = numConnections
-        print("Initialized \(numConnections) connections with \(connections.count) total edges")
+        print("Initialized \(offsets.count) bodies with connections (\(numConnections) total connections)")
         
+        self.connectionsBuffer = device.makeBuffer(bytes: connections, length: MemoryLayout<UInt32>.stride * connections.count, options: .storageModeShared)!
+        self.offsetsBuffer = device.makeBuffer(bytes: offsets, length: MemoryLayout<UInt32>.stride * offsets.count, options: .storageModeShared)!
+
         let mutexSize = MemoryLayout<Int32>.stride * Int(self.params.numNodes)
         self.mutexBuffer = device.makeBuffer(length: mutexSize, options: .storageModePrivate)!
         
@@ -206,6 +216,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let (bodyLinePipelineState, _) = try! device.makeRenderPipelineState(descriptor: bodyLinePipelineDescriptor, options: pipelineOption)
         self.bodyLineRenderPipeline = bodyLinePipelineState
         
+        let initalizeConnectionsFunction = try! library.makeFunction(name: "initalizeConnections", constantValues: functionConstants)
+        self.initalizeConnectionsPipeline = try! device.makeComputePipelineState(function: initalizeConnectionsFunction)
+        
         let initalizeBodiesFunction = try! library.makeFunction(name: "initalizeBodies", constantValues: functionConstants)
         self.initalizeBodiesPipeline = try! device.makeComputePipelineState(function: initalizeBodiesFunction)
         
@@ -226,6 +239,42 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.device = device
         super.init()
     }
+    
+    private func initalizeConnections(commandBuffer: borrowing MTLCommandBuffer) {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        
+        encoder.setComputePipelineState(initalizeConnectionsPipeline)
+        
+        encoder.setBuffer(self.connectionsBuffer, offset: 0, index: 0)
+        encoder.setBuffer(self.offsetsBuffer, offset: 0, index: 1)
+        encoder.setBuffer(self.connectionsDataBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
+
+        let threadgroupSize = MTLSize(width: 256, height: 1, depth: 1)
+        let elementsPerThread = 4 // e.g., 4
+        
+        // Correct threadgroup memory sizes
+        encoder.setThreadgroupMemoryLength(
+            MemoryLayout<Int32>.stride * threadgroupSize.width * elementsPerThread,
+            index: 0
+        )
+        encoder.setThreadgroupMemoryLength(
+            MemoryLayout<Int32>.stride * (threadgroupSize.width / 32),
+            index: 1
+        )
+
+        // Grid size based on numConnections, not numBodies
+        let totalElements = Int(params.numConnections) // or connectionsData.numConnections
+        let elementsPerThreadgroup = threadgroupSize.width * elementsPerThread
+        let gridSize = MTLSize(
+            width: (totalElements + elementsPerThreadgroup - 1) / elementsPerThreadgroup,
+            height: 1,
+            depth: 1
+        )
+        
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
+        encoder.endEncoding()
+    }
+    
     private func initalizeBodies(commandBuffer : borrowing MTLCommandBuffer) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
@@ -237,7 +286,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.bodyData.velocityBuffer, offset: 0, index: Int(BODY_VELOCITY_IDX))
         encoder.setBuffer(self.bodyData.accelerationBuffer, offset: 0, index: Int(BODY_ACCELERATION_IDX))
         encoder.setBuffer(self.bodyData.initialIdxBuffer, offset: 0, index: Int(BODY_INITIAL_IDX_IDX))
-        encoder.setBytes(&params.physics, length: MemoryLayout<PhysicsParams>.stride, index: 22)
+        encoder.setBytes(&params.physics, length: MemoryLayout<PhysicsParams>.stride, index: Int(PHYSICS_PARAMS_IDX))
         
         let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
                                height: 1, depth: 1)
@@ -362,7 +411,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.nodeData.bottomRightBuffer, offset: 0, index: Int(NODE_BOTTOM_RIGHT_IDX))
         encoder.setBuffer(self.nodeData.centerOfMassBuffer, offset: 0, index: Int(NODE_CENTER_OF_MASS_IDX))
         encoder.setBuffer(self.nodeData.isLeafBuffer, offset: 0, index: Int(NODE_IS_LEAF_IDX))
-        encoder.setBuffer(self.connectionsBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
+        encoder.setBuffer(self.connectionsDataBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
         encoder.setBuffer(self.bodyData.massBuffer, offset: 0, index: Int(BODY_MASS_IDX))
         encoder.setBuffer(self.bodyData.radiusBuffer, offset: 0, index: Int(BODY_RADIUS_IDX))
         encoder.setBuffer(self.bodyData.positionBuffer, offset: 0, index: Int(BODY_POSITION_IDX))
@@ -389,7 +438,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         defer { self.bodiesInitialized = true }
         if !self.bodiesInitialized {
             self.initalizeBodies(commandBuffer: commandBuffer)
+            self.initalizeConnections(commandBuffer: commandBuffer)
         }
+        
         
         if self.params.useBarnes {
             self.resetTree(commandBuffer: commandBuffer)
@@ -414,7 +465,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         renderEncoder.setRenderPipelineState(self.bodyLineRenderPipeline)
         renderEncoder.setObjectBuffer(self.self.bodyData.positionBuffer, offset: 0, index: Int(BODY_POSITION_IDX))
         renderEncoder.setObjectBuffer(self.transformBuffer, offset: 0, index: Int(SCREEN_TRANSFORM_IDX))
-        renderEncoder.setObjectBuffer(self.connectionsBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
+        renderEncoder.setObjectBuffer(self.connectionsDataBuffer, offset: 0, index: Int(CONNECTIONS_IDX))
         
         let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
         let oneThread = MTLSize(width: 1, height: 1, depth: 1)
@@ -425,12 +476,12 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         renderEncoder.endEncoding()
         commandBuffer.present(drawable)
-        
         commandBuffer.commit()
         
         commandBuffer.waitUntilCompleted()
+        
         //self.printPerBodyConnectionIdx()
-        self.printBodies()
+        //self.printBodies()
         //self.printTree()
         
     }
@@ -481,25 +532,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         print("TOTAL: \(leafCount) leaves, \(internalCount) internal, \(emptyCount) empty")
     }
-    
+    /*
     private func printPerBodyConnectionIdx() {
-        let uint32Ptr = connectionsBuffer.contents().assumingMemoryBound(to: UInt32.self)
-        let perBodyDataSize = 512 + 1
+        let connectionsDataPointer = connectionsDataBuffer.contents().assumingMemoryBound(to: ConnectionsData.self)
         
         print("\n=== CONNECTIONS DEBUG ===")
-        for bodyIdx in 0..<Int(self.params.numBodies) {
-            let bodyOffset = bodyIdx * perBodyDataSize
-            let numConns = Int(uint32Ptr[bodyOffset + 512])
-            
-            if numConns == 0 { continue }
-            
-            print("Body[\(bodyIdx)] has \(numConns) connections:")
-            for i in 0..<numConns {
-                let connIdx = uint32Ptr[bodyOffset + i]
-                print("  -> Body[\(connIdx)]")
+        withUnsafeMutablePointer(to: &connectionsDataPointer.pointee.connections.0) { connectionsPtr in
+            for i in 0..<Int(connectionsDataPointer.pointee.numBodiesWithConnections) {
+                print(connectionsPtr.advanced(by: i).pointee)
             }
         }
     }
+    */
     
     private func printBodies() {
         let massPtr = self.bodyData.massBuffer.contents().assumingMemoryBound(to: Float.self)

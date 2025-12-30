@@ -2,7 +2,7 @@
 #ifdef __METAL_VERSION__
 
 #include <metal_stdlib>
-#include "SharedWithMetal.h"
+#include "MetalShaders.h"
 
 using namespace metal;
 
@@ -49,7 +49,8 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     
     biPosition = (biPosition * transform.scale) + transform.offset;
     
-    if (connectionsData.numConnections != 0 && gid < bodyPositionsData.numInstances) {
+    
+    if (gid < connectionsData.numBodiesWithConnections - 1) {
         uint startIdx = connectionsData.offsets[gid];
         uint endIdx = connectionsData.offsets[gid + 1];
         uint numConns = endIdx - startIdx;
@@ -61,7 +62,9 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
             float2 midpoint = termination - biPosition;
             payload.connections[i] = midpoint;
         }
+        
     }
+    
 
     payload.position = biPosition;
     
@@ -92,8 +95,6 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 {
     output.set_primitive_count(payload.numConnections);
     
-    
-
     for (uint i = 0; i < payload.numConnections; i++) {
         // start of the line
         VertexOut v0;
