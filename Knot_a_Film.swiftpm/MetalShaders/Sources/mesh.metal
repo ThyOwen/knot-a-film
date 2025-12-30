@@ -1,4 +1,3 @@
-
 #ifdef __METAL_VERSION__
 
 #include <metal_stdlib>
@@ -14,7 +13,7 @@ struct BodyPayload {
 
 struct PointVertexOut {
     float4 position [[position]];
-    float size [[point_size]]; 
+    float size [[point_size]];
 };
 
 struct VertexOut {
@@ -25,7 +24,7 @@ struct PrimOut {
     float3 color;
 };
 
-struct FragmentIn { 
+struct FragmentIn {
     VertexOut v;
     PrimOut p;
 };
@@ -36,11 +35,11 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 [[object]] void objectShader(object_data BodyPayload& payload [[payload]],
                              mesh_grid_properties meshGridProperties,
                              constant BodyMemberData<float2>& bodyPositionsData [[buffer(BODY_POSITION_IDX)]],
+                             constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],  // NEW
                              constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
                              constant ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
                              uint gid [[thread_position_in_grid]])
 {
-
     if (gid >= bodyPositionsData.numInstances) {
         return;
     }
@@ -49,10 +48,9 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     
     biPosition = (biPosition * transform.scale) + transform.offset;
     
-    
-    if (gid < connectionsData.numBodiesWithConnections - 1) {
-        uint startIdx = connectionsData.offsets[gid];
-        uint endIdx = connectionsData.offsets[gid + 1];
+    if (gid < connectionsData.numBodies - 1) {
+        uint startIdx = offsets.data[gid];
+        uint endIdx = offsets.data[gid + 1];
         uint numConns = endIdx - startIdx;
         
         payload.numConnections = numConns;
@@ -62,12 +60,9 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
             float2 midpoint = termination - biPosition;
             payload.connections[i] = midpoint;
         }
-        
     }
-    
 
     payload.position = biPosition;
-    
     
     meshGridProperties.set_threadgroups_per_grid(uint3(1, 1, 1));
 }

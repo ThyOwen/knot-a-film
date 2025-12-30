@@ -50,6 +50,7 @@
 #define BODY_ACCELERATION_IDX       11
 #define BODY_INITIAL_IDX_IDX        12
 
+
 #define BODY_MASS_ALT_IDX           13
 #define BODY_RADIUS_ALT_IDX         14
 #define BODY_POSITION_ALT_IDX       15
@@ -63,6 +64,10 @@
 #define MUTEX_IDX                   20
 #define SCREEN_TRANSFORM_IDX        21
 #define PHYSICS_PARAMS_IDX          22
+
+#define BODY_OFFSETS_IDX 30
+#define BODY_OFFSETS_ALT_IDX 29
+
 
 struct ScreenTransform {
     simd_float2 offset;
@@ -127,8 +132,7 @@ using NodeMemberDataBool = NodeMemberData<bool>;
 struct ConnectionsData {
     uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
     //uint32_t connections[MAX_CONNECTIONS]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
-    uint32_t offsets[MAX_BODIES];
-    uint32_t numBodiesWithConnections;
+    uint32_t numBodies;
 };
 
 #ifdef __METAL_VERSION__

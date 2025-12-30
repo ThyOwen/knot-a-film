@@ -10,6 +10,8 @@ using namespace metal;
 //this computes the prefix sums from the offsets and then uses those to write connections to device memory
 kernel void initalizeConnections( const device uint* __restrict connections [[buffer(0)]],
                                   const device uint* __restrict offsets [[buffer(1)]],
+                                 
+                                  device BodyMemberData<uint>& bodyOffsets [[buffer(BODY_OFFSETS_IDX)]], //should probably by intialized directly 
                                   device ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
                               
                                   threadgroup int* __restrict__ shared [[threadgroup(0)]],
@@ -26,13 +28,13 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
     const uint base = tg_id * (threads_per_threadgroup * ELEMENTS_PER_THREAD);
     const uint local_base = tid * ELEMENTS_PER_THREAD;
 
-    // Load and sum elements
+    // Load and sum elements from offsets
     int vals[ELEMENTS_PER_THREAD];
     int sum = 0;
     
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint idx = base + local_base + i;
-        vals[i] = (idx < connectionsData.numBodiesWithConnections) ? offsets[idx] : 0;
+        vals[i] = (idx < connectionsData.numBodies) ? offsets[idx] : 0;
         sum += vals[i];
     }
 
@@ -72,9 +74,9 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
         uint local_idx = local_base + i;
         uint global_idx = base + local_idx;
 
-        if (global_idx < connectionsData.numBodiesWithConnections) {
+        if (global_idx < connectionsData.numBodies) {
             int prefixSum = shared[local_idx] + carry;
-            connectionsData.offsets[global_idx] = prefixSum;
+            bodyOffsets.data[global_idx] = prefixSum;
             
             uint startIdx = prefixSum;
             uint count = vals[i];

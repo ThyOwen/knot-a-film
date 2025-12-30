@@ -175,12 +175,14 @@ inline void groupBodies(constant BodyMemberData<float>& mass_in,
                         constant BodyMemberData<float2>& velocity_in,
                         constant BodyMemberData<float2>& acceleration_in,
                         constant BodyMemberData<uint>& initialIdx_in,
+                        constant BodyMemberData<uint>& offsets_in,
                         device BodyMemberData<float>& mass_out,
                         device BodyMemberData<float>& radius_out,
                         device BodyMemberData<float2>& position_out,
                         device BodyMemberData<float2>& velocity_out,
                         device BodyMemberData<float2>& acceleration_out,
                         device BodyMemberData<uint>& initialIdx_out,
+                        device BodyMemberData<uint>& offsets_out,
                         float2 topLeft,
                         float2 bottomRight,
                         threadgroup int* __restrict__ count,
@@ -202,6 +204,7 @@ inline void groupBodies(constant BodyMemberData<float>& mass_in,
         velocity_out.data[dest] = velocity_in.data[i];
         acceleration_out.data[dest] = acceleration_in.data[i];
         initialIdx_out.data[dest] = initialIdx_in.data[i];
+        offsets_out.data[dest] = offsets_in.data[i];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 }
@@ -257,15 +260,30 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
             velocity_out.data[i] = velocity_in.data[i];
             acceleration_out.data[i] = acceleration_in.data[i];
             initialIdx_out.data[i] = initialIdx_in.data[i];
+
         }
         return;
     }
 
     countBodies(position_in, nodeTopLeft, nodeBottomRight, count, nodeStart, nodeEnd, tid, threadgroup_size);
     computeOffset(count, nodeStart, tid);
-    groupBodies(mass_in, radius_in, position_in, velocity_in, acceleration_in, initialIdx_in,
-                mass_out, radius_out, position_out, velocity_out, acceleration_out, initialIdx_out,
-                nodeTopLeft, nodeBottomRight, count, nodeStart, nodeEnd, tid, threadgroup_size);
+
+    //group bodies
+    threadgroup int* count2 = &count[4];
+    for (int i = nodeStart + tid; i <= nodeEnd; i += threadgroup_size)
+    {
+        float2 pos = position_in.data[i];
+        int q = getQuadrant(nodeTopLeft, nodeBottomRight, pos.x, pos.y);
+        int dest = atomic_fetch_add_explicit((threadgroup atomic_int*)&count2[q - 1], 1, memory_order_relaxed);
+        
+        mass_out.data[dest] = mass_in.data[i];
+        radius_out.data[dest] = radius_in.data[i];
+        position_out.data[dest] = position_in.data[i];
+        velocity_out.data[dest] = velocity_in.data[i];
+        acceleration_out.data[dest] = acceleration_in.data[i];
+        initialIdx_out.data[dest] = initialIdx_in.data[i];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (tid < 4) {
         uint quadIndex = tid + 1;
@@ -464,6 +482,7 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
 }
 
 inline void computeConnectionsForce(device BodyMemberData<float2>& position,
+                                    constant BodyMemberData<uint>& offsets,
                                     float2 bodyPos,
                                     thread float2& bodyAccel,
                                     constant ConnectionsData& connectionsData,
@@ -476,8 +495,8 @@ inline void computeConnectionsForce(device BodyMemberData<float2>& position,
         return;
     }
     
-    uint startIdx = connectionsData.offsets[gid];
-    uint endIdx = connectionsData.offsets[gid + 1];
+    uint startIdx = offsets.data[gid];
+    uint endIdx = offsets.data[gid + 1];
     uint numConns = endIdx - startIdx;
     
     float2 force = { 0.0f, 0.0f };
@@ -524,6 +543,7 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
                                device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                                device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                                device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
+                               constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],  // NEW
                                constant PhysicsParams &physics [[buffer(PHYSICS_PARAMS_IDX)]],
                                uint gid [[thread_position_in_grid]],
                                ushort simd_lane_id [[thread_index_in_simdgroup]],
@@ -533,12 +553,11 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
         return;
     }
     
-    float massLocal = mass.data[gid];
-    float radiusLocal = radius.data[gid];
-    uint initialIdxLocal = initialIdx.data[gid];
+    float bodyMass = mass.data[gid];
+    float bodyRadius = radius.data[gid];
+    uint bodyInitialIdx = initialIdx.data[gid];
 
     float2 bodyPos = position.data[gid];
-    float bodyRadius = radiusLocal;
     float2 bodyVel = velocity.data[gid];
     float2 bodyAccel = { 0.0f, 0.0f };
 
@@ -549,8 +568,8 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
         computeDirectSumForce(position, bodyPos, bodyAccel, physics, gid, simd_lane_id, threads_per_simdgroup);
     }
     
-    if (computeConnections && gid < connectionsData.numBodiesWithConnections) {
-        computeConnectionsForce(position, bodyPos, bodyAccel, connectionsData, physics, gid, simd_lane_id, threads_per_simdgroup);
+    if (computeConnections && gid < connectionsData.numBodies) {
+        computeConnectionsForce(position, offsets, bodyPos, bodyAccel, connectionsData, physics, gid, simd_lane_id, threads_per_simdgroup);
     }
     
     bodyVel *= physics.damping;
@@ -561,19 +580,18 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
     
     const float MAX_VELOCITY = 2.0f;
     if (velMagnitude > MAX_VELOCITY) {
-        
+
     }
     
     bodyPos += bodyVel * physics.dt;
     
-    uint origIdx = initialIdxLocal;
-    position.data[origIdx] = bodyPos;
-    velocity.data[origIdx] = bodyVel;
-    acceleration.data[origIdx] = bodyAccel;
+    position.data[bodyInitialIdx] = bodyPos;
+    velocity.data[bodyInitialIdx] = bodyVel;
+    acceleration.data[bodyInitialIdx] = bodyAccel;
 
-    mass.data[origIdx] = massLocal;
-    radius.data[origIdx] = radiusLocal;
-    initialIdx.data[origIdx] = initialIdxLocal;
+    mass.data[bodyInitialIdx] = bodyMass;
+    radius.data[bodyInitialIdx] = bodyRadius;
+    initialIdx.data[bodyInitialIdx] = bodyInitialIdx;
 }
 
 #endif
