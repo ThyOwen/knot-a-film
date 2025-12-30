@@ -49,14 +49,11 @@
 #define BODY_VELOCITY_IDX           10
 #define BODY_ACCELERATION_IDX       11
 #define BODY_INITIAL_IDX_IDX        12
+#define BODY_OFFSETS_IDX            13
 
-
-#define BODY_MASS_ALT_IDX           13
-#define BODY_RADIUS_ALT_IDX         14
+#define BODY_MASS_ALT_IDX           14
 #define BODY_POSITION_ALT_IDX       15
-#define BODY_VELOCITY_ALT_IDX       16
-#define BODY_ACCELERATION_ALT_IDX   17
-#define BODY_INITIAL_IDX_ALT_IDX    18
+#define BODY_INITIAL_IDX_ALT_IDX    16
 
 //MARK: Other Buffer Indices
 
@@ -65,8 +62,6 @@
 #define SCREEN_TRANSFORM_IDX        21
 #define PHYSICS_PARAMS_IDX          22
 
-#define BODY_OFFSETS_IDX 30
-#define BODY_OFFSETS_ALT_IDX 29
 
 
 struct ScreenTransform {
@@ -101,14 +96,14 @@ struct GraphParams {
 
 template <typename T>
 struct NodeMemberData {
-    T data[MAX_NODES];
     uint32_t numInstances;
+    T data[MAX_NODES];
 };
 
 template <typename T>
 struct BodyMemberData {
-    T data[MAX_BODIES];
     uint32_t numInstances;
+    T data[MAX_BODIES];
 };
 
 template struct BodyMemberData<float>;
@@ -130,9 +125,9 @@ using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
 using NodeMemberDataBool = NodeMemberData<bool>;
 
 struct ConnectionsData {
+    uint32_t numBodies;
     uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
     //uint32_t connections[MAX_CONNECTIONS]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
-    uint32_t numBodies;
 };
 
 #ifdef __METAL_VERSION__

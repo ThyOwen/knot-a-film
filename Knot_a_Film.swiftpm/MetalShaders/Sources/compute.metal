@@ -216,18 +216,15 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
                                     device NodeMemberData<uint>& start [[buffer(NODE_START_IDX)]],
                                     device NodeMemberData<uint>& end [[buffer(NODE_END_IDX)]],
                                     device NodeMemberData<bool>& isLeaf [[buffer(NODE_IS_LEAF_IDX)]],
+                                    
                                     constant BodyMemberData<float>& mass_in [[buffer(BODY_MASS_IDX)]],
-                                    constant BodyMemberData<float>& radius_in [[buffer(BODY_RADIUS_IDX)]],
                                     constant BodyMemberData<float2>& position_in [[buffer(BODY_POSITION_IDX)]],
-                                    constant BodyMemberData<float2>& velocity_in [[buffer(BODY_VELOCITY_IDX)]],
-                                    constant BodyMemberData<float2>& acceleration_in [[buffer(BODY_ACCELERATION_IDX)]],
                                     constant BodyMemberData<uint>& initialIdx_in [[buffer(BODY_INITIAL_IDX_IDX)]],
+                                    
                                     device BodyMemberData<float>& mass_out [[buffer(BODY_MASS_ALT_IDX)]],
-                                    device BodyMemberData<float>& radius_out [[buffer(BODY_RADIUS_ALT_IDX)]],
                                     device BodyMemberData<float2>& position_out [[buffer(BODY_POSITION_ALT_IDX)]],
-                                    device BodyMemberData<float2>& velocity_out [[buffer(BODY_VELOCITY_ALT_IDX)]],
-                                    device BodyMemberData<float2>& acceleration_out [[buffer(BODY_ACCELERATION_ALT_IDX)]],
                                     device BodyMemberData<uint>& initialIdx_out [[buffer(BODY_INITIAL_IDX_ALT_IDX)]],
+                                    
                                     constant int &nodeOffset [[buffer(22)]],
                                     threadgroup int* __restrict__ count [[threadgroup(0)]],
                                     ushort tid [[thread_position_in_threadgroup]],
@@ -255,10 +252,7 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
     if (nodeIndex >= uint(leafLimit) || nodeStart == nodeEnd) {
         for (int i = nodeStart; i <= nodeEnd; ++i) {
             mass_out.data[i] = mass_in.data[i];
-            radius_out.data[i] = radius_in.data[i];
             position_out.data[i] = position_in.data[i];
-            velocity_out.data[i] = velocity_in.data[i];
-            acceleration_out.data[i] = acceleration_in.data[i];
             initialIdx_out.data[i] = initialIdx_in.data[i];
 
         }
@@ -270,17 +264,13 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
 
     //group bodies
     threadgroup int* count2 = &count[4];
-    for (int i = nodeStart + tid; i <= nodeEnd; i += threadgroup_size)
-    {
+    for (int i = nodeStart + tid; i <= nodeEnd; i += threadgroup_size) {
         float2 pos = position_in.data[i];
         int q = getQuadrant(nodeTopLeft, nodeBottomRight, pos.x, pos.y);
         int dest = atomic_fetch_add_explicit((threadgroup atomic_int*)&count2[q - 1], 1, memory_order_relaxed);
         
         mass_out.data[dest] = mass_in.data[i];
-        radius_out.data[dest] = radius_in.data[i];
         position_out.data[dest] = position_in.data[i];
-        velocity_out.data[dest] = velocity_in.data[i];
-        acceleration_out.data[dest] = acceleration_in.data[i];
         initialIdx_out.data[dest] = initialIdx_in.data[i];
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -449,7 +439,7 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
     
     float2 force = { 0.0f, 0.0f };
     
-    for (uint base = 0; base < numBodies; base += threads_per_simdgroup) {
+    for (int base = 0; base < (int)numBodies; base += threads_per_simdgroup) {
         uint j = base + simd_lane_id;
         
         float2 otherPos;
@@ -459,7 +449,7 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
             otherPos = { 0.0f, 0.0f };
         }
         
-        for (uint lane = 0; lane < threads_per_simdgroup && (base + lane) < numBodies; ++lane) {
+        for (short lane = 0; lane < threads_per_simdgroup && (base + lane) < (int)numBodies; ++lane) {
             float2 pos = simd_broadcast(otherPos, lane);
             
             uint otherIdx = base + lane;
@@ -553,12 +543,13 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
         return;
     }
     
-    float bodyMass = mass.data[gid];
-    float bodyRadius = radius.data[gid];
-    uint bodyInitialIdx = initialIdx.data[gid];
 
+    uint bodyInitialIdx = initialIdx.data[gid];
     float2 bodyPos = position.data[gid];
-    float2 bodyVel = velocity.data[gid];
+    float bodyMass = mass.data[gid];
+
+    float bodyRadius = radius.data[bodyInitialIdx];
+    float2 bodyVel = velocity.data[bodyInitialIdx];
     float2 bodyAccel = { 0.0f, 0.0f };
 
     if (useBarnes) {

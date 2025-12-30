@@ -90,7 +90,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 {
     output.set_primitive_count(payload.numConnections);
     
-    for (uint i = 0; i < payload.numConnections; i++) {
+    for (int i = 0; i < (int)payload.numConnections; i++) {
         // start of the line
         VertexOut v0;
         v0.position = float4(payload.position, 0.0, 1.0);

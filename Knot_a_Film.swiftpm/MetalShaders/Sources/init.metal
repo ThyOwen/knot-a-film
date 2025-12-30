@@ -32,7 +32,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
     int vals[ELEMENTS_PER_THREAD];
     int sum = 0;
     
-    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+    for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint idx = base + local_base + i;
         vals[i] = (idx < connectionsData.numBodies) ? offsets[idx] : 0;
         sum += vals[i];
@@ -42,7 +42,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
     int simd_offset = simd_prefix_exclusive_sum(sum);
 
     int running = simd_offset;
-    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+    for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         shared[local_base + i] = running;
         running += vals[i];
     }
@@ -70,7 +70,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
     // Add prefix of tile sums and write results
     int carry = simdSums[simd_id];
 
-    for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i) {
+    for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint local_idx = local_base + i;
         uint global_idx = base + local_idx;
 
@@ -81,7 +81,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
             uint startIdx = prefixSum;
             uint count = vals[i];
             
-            for (uint k = 0; k < count; ++k) {
+            for (int k = 0; k < (int)count; ++k) {
                 connectionsData.connections[startIdx + k] = connections[startIdx + k];
             }
         }
