@@ -7,8 +7,8 @@ using namespace metal;
 
 struct BodyPayload {
     float2 position;
-    float2 connections[MAX_CONNECTIONS];
-    uint numConnections;
+    float2 edges[MAX_EDGES];
+    uint numEdges;
 };
 
 struct PointVertexOut {
@@ -35,12 +35,12 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 [[object]] void objectShader(object_data BodyPayload& payload [[payload]],
                              mesh_grid_properties meshGridProperties,
                              constant BodyMemberData<float2>& bodyPositionsData [[buffer(BODY_POSITION_IDX)]],
-                             constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],  // NEW
+                             constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],
                              constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
-                             constant ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
+                             constant EdgesMemberData<uint>& edgesIndiciesData [[buffer(EDGE_INDICIES_IDX)]],
                              uint gid [[thread_position_in_grid]])
 {
-    if (gid >= bodyPositionsData.numInstances) {
+    if (gid >= bodyPositionsData.numBodies) {
         return;
     }
     
@@ -48,17 +48,17 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     
     biPosition = (biPosition * transform.scale) + transform.offset;
     
-    if (gid < connectionsData.numBodies - 1) {
+    if (gid < edgesIndiciesData.numBodies - 1) {
         uint startIdx = offsets.data[gid];
         uint endIdx = offsets.data[gid + 1];
         uint numConns = endIdx - startIdx;
         
-        payload.numConnections = numConns;
+        payload.numEdges = numConns;
         for (int i = 0; i < (int)numConns; i++) {
-            uint idx = connectionsData.connections[startIdx + i];
+            uint idx = edgesIndiciesData.data[startIdx + i];
             float2 termination = (bodyPositionsData.data[idx] * transform.scale) + transform.offset;
             float2 midpoint = termination - biPosition;
-            payload.connections[i] = midpoint;
+            payload.edges[i] = midpoint;
         }
     }
 
@@ -88,9 +88,9 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                              const object_data BodyPayload& payload [[payload]],
                              ushort tid [[thread_index_in_threadgroup]])
 {
-    output.set_primitive_count(payload.numConnections);
+    output.set_primitive_count(payload.numEdges);
     
-    for (int i = 0; i < (int)payload.numConnections; i++) {
+    for (int i = 0; i < (int)payload.numEdges; i++) {
         // start of the line
         VertexOut v0;
         v0.position = float4(payload.position, 0.0, 1.0);
@@ -98,7 +98,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 
         // end of the line
         VertexOut v1;
-        v1.position = float4(payload.position + payload.connections[i], 0.0, 1.0);
+        v1.position = float4(payload.position + payload.edges[i], 0.0, 1.0);
         output.set_vertex(i * 2 + 1, v1);
 
         PrimOut p;

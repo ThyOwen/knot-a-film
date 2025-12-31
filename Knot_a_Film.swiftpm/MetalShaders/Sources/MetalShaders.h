@@ -8,19 +8,19 @@
 
 #define SIMDGROUP_SIZE 32
 
-#define MAX_CONNECTIONS 1024
+#define MAX_EDGES 1024
 #define MAX_BODIES 1024
 #define MAX_NODES 349525
 
-//MARK: Function Constant Indices
+// MARK: Function Constant Indices
 
 #define FC_NUM_BODIES           0
-#define FC_NUM_CONNECTIONS      1
+#define FC_NUM_EDGES      1
 #define FC_NUM_NODES            2
 #define FC_LEAF_LIMIT           3
 #define FC_BLOCK_SIZE           4
 #define FC_USE_BARNES           6
-#define FC_COMPUTE_CONNECTIONS  7
+#define FC_COMPUTE_EDGES  7
 
 #define FC_SPRING_CONSTANT      8
 #define FC_EDGE_REPULSION       9
@@ -31,7 +31,7 @@
 #define FC_COLLISION_THRESHOLD  14
 #define FC_DAMPING              15
 
-//MARK: Node Buffer Indices
+// MARK: Node Buffer Indices
 
 #define NODE_TOP_LEFT_IDX           0
 #define NODE_BOTTOM_RIGHT_IDX       1
@@ -41,7 +41,7 @@
 #define NODE_END_IDX                5
 #define NODE_IS_LEAF_IDX            6
 
-//MARK: Body Buffer Indices
+// MARK: Body Buffer Indices
 
 #define BODY_MASS_IDX               7
 #define BODY_RADIUS_IDX             8
@@ -55,15 +55,19 @@
 #define BODY_POSITION_ALT_IDX       15
 #define BODY_INITIAL_IDX_ALT_IDX    16
 
-//MARK: Other Buffer Indices
+// MARK: Edges Buffer Indicies
 
-#define CONNECTIONS_IDX             19
+#define EDGE_INDICIES_IDX           17
+#define EDGE_BODY_IDX               18
+
+
+// MARK: Other Buffer Indices
+
 #define MUTEX_IDX                   20
 #define SCREEN_TRANSFORM_IDX        21
 #define PHYSICS_PARAMS_IDX          22
 
-
-
+// MARK: Generic
 struct ScreenTransform {
     simd_float2 offset;
     simd_float2 scale;
@@ -83,26 +87,38 @@ struct PhysicsParams {
 struct GraphParams {
     uint32_t maxDepth;
     uint32_t numBodies;
-    uint32_t numConnections;
+    uint32_t numEdges;
     uint32_t numNodes;
     uint32_t leafLimit;
 
     int blockSize;
     bool useBarnes;
-    bool computeConnections;
+    bool computeEdges;
 
     struct PhysicsParams physics;
 };
 
+// MARK: Nodes
 template <typename T>
 struct NodeMemberData {
-    uint32_t numInstances;
+    uint32_t numNodes;
     T data[MAX_NODES];
 };
 
+template struct NodeMemberData<simd_float2>;
+template struct NodeMemberData<float>;
+template struct NodeMemberData<uint32_t>;
+template struct NodeMemberData<bool>;
+
+using NodeMemberDataFloat2 = NodeMemberData<simd_float2>;
+using NodeMemberDataFloat = NodeMemberData<float>;
+using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
+using NodeMemberDataBool = NodeMemberData<bool>;
+
+// MARK: Bodies
 template <typename T>
 struct BodyMemberData {
-    uint32_t numInstances;
+    uint32_t numBodies;
     T data[MAX_BODIES];
 };
 
@@ -110,36 +126,33 @@ template struct BodyMemberData<float>;
 template struct BodyMemberData<simd_float2>;
 template struct BodyMemberData<uint32_t>;
 
-template struct NodeMemberData<simd_float2>;
-template struct NodeMemberData<float>;
-template struct NodeMemberData<uint32_t>;
-template struct NodeMemberData<bool>;
-
 using BodyMemberDataFloat = BodyMemberData<float>;
 using BodyMemberDataFloat2 = BodyMemberData<simd_float2>;
 using BodyMemberDataUInt32 = BodyMemberData<uint32_t>;
 
-using NodeMemberDataFloat2 = NodeMemberData<simd_float2>;
-using NodeMemberDataFloat = NodeMemberData<float>;
-using NodeMemberDataUInt32 = NodeMemberData<uint32_t>;
-using NodeMemberDataBool = NodeMemberData<bool>;
-
-struct ConnectionsData {
+// MARK: Bodies
+template <typename T>
+struct EdgesMemberData {
     uint32_t numBodies;
-    uint32_t connections[MAX_BODIES * MAX_CONNECTIONS];
-    //uint32_t connections[MAX_CONNECTIONS]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
+    T data[MAX_BODIES * MAX_EDGES];
+    //uint32_t connections[MAX_EDGES]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
 };
+
+template struct EdgesMemberData<uint32_t>;
+
+using EdgesMemberDataUInt32 = EdgesMemberData<uint32_t>;
+
 
 #ifdef __METAL_VERSION__
 
 constant uint   numBodies          [[ function_constant(FC_NUM_BODIES) ]];
-constant uint   numConnections     [[ function_constant(FC_NUM_CONNECTIONS) ]];
+constant uint   numEdges           [[ function_constant(FC_NUM_EDGES) ]];
 constant uint   numNodes           [[ function_constant(FC_NUM_NODES) ]];
 constant uint   leafLimit          [[ function_constant(FC_LEAF_LIMIT) ]];
 
 constant int   blockSize          [[ function_constant(FC_BLOCK_SIZE) ]];
 constant bool  useBarnes          [[ function_constant(FC_USE_BARNES) ]];
-constant bool  computeConnections [[ function_constant(FC_COMPUTE_CONNECTIONS) ]];
+constant bool  computeEdges       [[ function_constant(FC_COMPUTE_EDGES) ]];
 
 constant float springConstant     [[ function_constant(FC_SPRING_CONSTANT) ]];
 constant float edgeRepulsion      [[ function_constant(FC_EDGE_REPULSION) ]];

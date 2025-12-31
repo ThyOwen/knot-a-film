@@ -41,14 +41,14 @@ import SharedWithMetal
         
         let movies = Array(moviesTotal)
         
-        var flatConnections: [UInt32] = []
+        var flatEdges: [UInt32] = []
         var offsets: [UInt32] = [] // offsets is a per-body counts array; its length equals number of bodies.
-        var numOfBodiesWithConnections: UInt32 = 0
+        var numOfBodiesWithEdges: UInt32 = 0
         
-        var highestNumConnections = 0
+        var highestNumEdges = 0
         
         for (aIdx, movieA) in movies.enumerated() {
-            var connectionCount = 0
+            var edgeCount = 0
             
             for (bIdx, movieB) in movies.enumerated() {
                 if bIdx == aIdx { continue }
@@ -59,31 +59,31 @@ import SharedWithMetal
                 let isEdge = hasSharedActors || hasSharedDirectors || hasSharedWriters
                 
                 if isEdge {
-                    flatConnections.append(UInt32(bIdx))
-                    connectionCount += 1
+                    flatEdges.append(UInt32(bIdx))
+                    edgeCount += 1
                 }
             }
             
-            if connectionCount > 0 {
-                highestNumConnections = max(highestNumConnections, connectionCount)
-                numOfBodiesWithConnections += 1
+            if edgeCount > 0 {
+                highestNumEdges = max(highestNumEdges, edgeCount)
+                numOfBodiesWithEdges += 1
             }
             
-            offsets.append(UInt32(connectionCount))
+            offsets.append(UInt32(edgeCount))
         }
         
-        print("total connections", flatConnections)
-        print("connection offsets", offsets)
-        print("highestNumConnections", highestNumConnections)
-        print("numOfBodiesWithConnections", numOfBodiesWithConnections)
+        print("total edges", flatEdges)
+        print("edge offsets", offsets)
+        print("highestNumEdges", highestNumEdges)
+        print("numOfBodiesWithEdges", numOfBodiesWithEdges)
         
-        let totalConnections = UInt32(flatConnections.count)
-        let renderer = GraphRenderer.init(connections: flatConnections, offsets: offsets, numConnections: totalConnections)
+        let totalEdges = UInt32(flatEdges.count)
+        let renderer = GraphRenderer.init(edges: flatEdges, offsets: offsets, numEdges: totalEdges)
         return Self.init(movies, moviePeople, renderer)
     }
     
-    //MARK: - Connections
-    private static func findConnections(between watchedMovies : borrowing [MovieDTO]) -> [MovieEdge] {
+    //MARK: - Edges
+    private static func findEdges(between watchedMovies : borrowing [MovieDTO]) -> [MovieEdge] {
         
         var edges : [MovieEdge] = []
         

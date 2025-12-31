@@ -7,22 +7,23 @@ using namespace metal;
 
 #define ELEMENTS_PER_THREAD 4
 
-//this computes the prefix sums from the offsets and then uses those to write connections to device memory
-kernel void initalizeConnections( const device uint* __restrict connections [[buffer(0)]],
-                                  const device uint* __restrict offsets [[buffer(1)]],
+//this computes the prefix sums from the offsets and then uses those to write edges to device memory
+kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
+                            const device uint* __restrict offsets [[buffer(1)]],
                                  
-                                  device BodyMemberData<uint>& bodyOffsets [[buffer(BODY_OFFSETS_IDX)]], //should probably by intialized directly 
-                                  device ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
+                            device BodyMemberData<uint>& bodyOffsets [[buffer(BODY_OFFSETS_IDX)]], //should probably by intialized directly
+                            device EdgesMemberData<uint>& edgeIndiciesData [[buffer(EDGE_INDICIES_IDX)]],
+                            device EdgesMemberData<uint>& edgeBodyData [[buffer(EDGE_BODY_IDX)]],
                               
-                                  threadgroup int* __restrict__ shared [[threadgroup(0)]],
-                                  threadgroup int* __restrict__ simdSums [[threadgroup(1)]],
+                            threadgroup int* __restrict__ shared [[threadgroup(0)]],
+                            threadgroup int* __restrict__ simdSums [[threadgroup(1)]],
                               
-                                  ushort tid [[thread_index_in_threadgroup]],
-                                  ushort lane [[thread_index_in_simdgroup]],
-                                  ushort simd_id [[simdgroup_index_in_threadgroup]],
-                                  ushort tg_id [[threadgroup_position_in_grid]],
-                                  ushort simdgroups_per_threadgroup [[simdgroups_per_threadgroup]],
-                                  ushort threads_per_threadgroup [[threads_per_threadgroup]]
+                            ushort tid [[thread_index_in_threadgroup]],
+                            ushort lane [[thread_index_in_simdgroup]],
+                            ushort simd_id [[simdgroup_index_in_threadgroup]],
+                            ushort tg_id [[threadgroup_position_in_grid]],
+                            ushort simdgroups_per_threadgroup [[simdgroups_per_threadgroup]],
+                            ushort threads_per_threadgroup [[threads_per_threadgroup]]
 ) {
 
     const uint base = tg_id * (threads_per_threadgroup * ELEMENTS_PER_THREAD);
@@ -34,7 +35,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
     
     for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint idx = base + local_base + i;
-        vals[i] = (idx < connectionsData.numBodies) ? offsets[idx] : 0;
+        vals[i] = (idx < edgeIndiciesData.numBodies) ? offsets[idx] : 0;
         sum += vals[i];
     }
 
@@ -74,7 +75,7 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
         uint local_idx = local_base + i;
         uint global_idx = base + local_idx;
 
-        if (global_idx < connectionsData.numBodies) {
+        if (global_idx < edgeIndiciesData.numBodies) {
             int prefixSum = shared[local_idx] + carry;
             bodyOffsets.data[global_idx] = prefixSum;
             
@@ -82,7 +83,8 @@ kernel void initalizeConnections( const device uint* __restrict connections [[bu
             uint count = vals[i];
             
             for (int k = 0; k < (int)count; ++k) {
-                connectionsData.connections[startIdx + k] = connections[startIdx + k];
+                edgeIndiciesData.data[startIdx + k] = edges[startIdx + k];
+                edgeBodyData.data[startIdx + k] = global_idx;
             }
         }
     }
@@ -94,7 +96,7 @@ kernel void initalizeBodies( device BodyMemberData<float>& mass [[buffer(BODY_MA
                              device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                              device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                              device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
-                             constant PhysicsParams& params [[buffer(CONNECTIONS_IDX)]],
+                             constant PhysicsParams& params [[buffer(EDGE_INDICIES_IDX)]],
                              uint gid [[thread_position_in_grid]]
 ) {
     if (gid >= numBodies) {

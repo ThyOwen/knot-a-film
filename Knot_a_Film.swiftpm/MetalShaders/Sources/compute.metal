@@ -15,7 +15,7 @@ kernel void resetKernel(device NodeMemberData<float2>& topLeft  [[buffer(NODE_TO
                         device atomic_int *mutex  [[buffer(MUTEX_IDX)]],
                         uint gid  [[thread_position_in_grid]]
 ) {
-    if (gid < uint(topLeft.numInstances)) {
+    if (gid < uint(topLeft.numNodes)) {
         topLeft.data[gid] = {INFINITY, -INFINITY};
         bottomRight.data[gid] = {-INFINITY, INFINITY};
         centerOfMass.data[gid] = {-1.0h, -1.0h};
@@ -234,7 +234,7 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
 ) {
     uint nodeIndex = nodeOffset + bid;
 
-    if (nodeIndex >= topLeft.numInstances)
+    if (nodeIndex >= topLeft.numNodes)
         return;
 
     int nodeStart = start.data[nodeIndex];
@@ -248,7 +248,7 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
     computeCenterOfMass(nodeIndex, centerOfMass, totalMass, position_in, mass_in, nodeStart, nodeEnd, tid, simd_lane_id, threadgroup_size);
     
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    
+
     if (nodeIndex >= uint(leafLimit) || nodeStart == nodeEnd) {
         for (int i = nodeStart; i <= nodeEnd; ++i) {
             mass_out.data[i] = mass_in.data[i];
@@ -273,6 +273,7 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
         position_out.data[dest] = position_in.data[i];
         initialIdx_out.data[dest] = initialIdx_in.data[i];
     }
+    
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (tid < 4) {
@@ -366,7 +367,7 @@ inline void computeBarnesHuntForce( constant NodeMemberData<float2>& topLeft,
         uint curIndex = stack[stackIdx];
         float curWidth = widthStack[stackIdx];
         
-        if (curIndex >= topLeft.numInstances || curIndex < 0.0h) {
+        if (curIndex >= topLeft.numNodes || curIndex < 0.0h) {
             continue;
         }
         
@@ -471,19 +472,18 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
     bodyAccel += force;
 }
 
-inline void computeConnectionsForce(device BodyMemberData<float2>& position,
-                                    constant BodyMemberData<uint>& offsets,
-                                    float2 bodyPos,
-                                    thread float2& bodyAccel,
-                                    constant ConnectionsData& connectionsData,
-                                    constant PhysicsParams &physics,
-                                    uint gid,
-                                    ushort simd_lane_id,
-                                    ushort threads_per_simdgroup
+inline void computeEdgesForce( device BodyMemberData<float2>& position,
+                               constant BodyMemberData<uint>& offsets,
+                               float2 bodyPos,
+                               thread float2& bodyAccel,
+                               constant EdgesMemberData<uint>& edgesIndiciesData,
+                               constant PhysicsParams &physics,
+                               uint gid,
+                               ushort simd_lane_id,
+                               ushort threads_per_simdgroup
 ) {
-    if (gid >= numBodies) {
+    if (gid >= numBodies)
         return;
-    }
     
     uint startIdx = offsets.data[gid];
     uint endIdx = offsets.data[gid + 1];
@@ -496,12 +496,14 @@ inline void computeConnectionsForce(device BodyMemberData<float2>& position,
         
         float2 otherPos;
         if (localIdx < numConns) {
-            uint connectionIdx = connectionsData.connections[startIdx + localIdx];
-            otherPos = position.data[connectionIdx];
+            uint edgeIdx = edgesIndiciesData.data[startIdx + localIdx];
+            otherPos = position.data[edgeIdx];
         } else {
             otherPos = { 0.0f, 0.0f };
         }
         
+        simdgroup_barrier(mem_flags::mem_threadgroup);
+
         for (int lane = 0; lane < threads_per_simdgroup && (base + lane) < (int)numConns; ++lane) {
             float2 pos = simd_broadcast(otherPos, lane);
             
@@ -526,14 +528,18 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
                                constant NodeMemberData<float2>& bottomRight [[buffer(NODE_BOTTOM_RIGHT_IDX)]],
                                constant NodeMemberData<float2>& centerOfMass [[buffer(NODE_CENTER_OF_MASS_IDX)]],
                                constant NodeMemberData<bool>& isLeaf [[buffer(NODE_IS_LEAF_IDX)]],
-                               constant ConnectionsData& connectionsData [[buffer(CONNECTIONS_IDX)]],
+                               //Body
                                device BodyMemberData<float>& mass [[buffer(BODY_MASS_IDX)]],
-                               device BodyMemberData<float>& radius [[buffer(BODY_RADIUS_IDX)]],
+                               constant BodyMemberData<float>& radius [[buffer(BODY_RADIUS_IDX)]],
                                device BodyMemberData<float2>& position [[buffer(BODY_POSITION_IDX)]],
                                device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                                device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                                device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
-                               constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],  // NEW
+                               constant BodyMemberData<uint>& offsets [[buffer(BODY_OFFSETS_IDX)]],
+                               //Connections
+                               constant EdgesMemberData<uint>& edgesIndiciesData [[buffer(EDGE_INDICIES_IDX)]],
+                               constant EdgesMemberData<uint>& edgesBodyData [[buffer(EDGE_BODY_IDX)]],
+                               
                                constant PhysicsParams &physics [[buffer(PHYSICS_PARAMS_IDX)]],
                                uint gid [[thread_position_in_grid]],
                                ushort simd_lane_id [[thread_index_in_simdgroup]],
@@ -559,8 +565,8 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
         computeDirectSumForce(position, bodyPos, bodyAccel, physics, gid, simd_lane_id, threads_per_simdgroup);
     }
     
-    if (computeConnections && gid < connectionsData.numBodies) {
-        computeConnectionsForce(position, offsets, bodyPos, bodyAccel, connectionsData, physics, gid, simd_lane_id, threads_per_simdgroup);
+    if (computeEdges && gid < edgesIndiciesData.numBodies) {
+        computeEdgesForce(position, offsets, bodyPos, bodyAccel, edgesIndiciesData, physics, gid, simd_lane_id, threads_per_simdgroup);
     }
     
     bodyVel *= physics.damping;
@@ -581,7 +587,6 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
     acceleration.data[bodyInitialIdx] = bodyAccel;
 
     mass.data[bodyInitialIdx] = bodyMass;
-    radius.data[bodyInitialIdx] = bodyRadius;
     initialIdx.data[bodyInitialIdx] = bodyInitialIdx;
 }
 

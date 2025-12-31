@@ -11,12 +11,12 @@ import class Metal.MTLFunctionConstantValues
 
 extension GraphParams {
 
-    public static func makeDefault( numBodies: UInt32, numConnections: UInt32 ) -> GraphParams {
+    public static func makeDefault( numBodies: UInt32, numEdges: UInt32 ) -> GraphParams {
         
         var p = GraphParams()
         
         p.numBodies = numBodies
-        p.numConnections = numConnections
+        p.numEdges = numEdges
         
         p.maxDepth = 8
         p.numNodes = (UInt32(pow(4.0, Double(p.maxDepth + 1))) - 1) / 3
@@ -24,7 +24,7 @@ extension GraphParams {
         
         p.blockSize = 32
         p.useBarnes = true
-        p.computeConnections = true
+        p.computeEdges = true
         
         p.physics.springConstant = 1.0
         p.physics.edgeRepulsion = 1.0
@@ -47,9 +47,9 @@ extension GraphParams {
         )
         
         metalFunctionConstants.setConstantValue(
-            &self.numConnections,
+            &self.numEdges,
             type: .uint,
-            index: Int(FC_NUM_CONNECTIONS)
+            index: Int(FC_NUM_EDGES)
         )
         
         metalFunctionConstants.setConstantValue(
@@ -77,9 +77,9 @@ extension GraphParams {
         )
         
         metalFunctionConstants.setConstantValue(
-            &self.computeConnections,
+            &self.computeEdges,
             type: .bool,
-            index: Int(FC_COMPUTE_CONNECTIONS)
+            index: Int(FC_COMPUTE_EDGES)
         )
         
         metalFunctionConstants.setConstantValue(
