@@ -90,14 +90,15 @@ float uintToFloat(uint u) {
     return as_type<float>(u ^ mask);
 }
 
+
 kernel void radixSortKV(device float* keysIn     [[buffer(0)]],
-                        device uint* valuesIn   [[buffer(1)]],
+                        device uint* valuesIn    [[buffer(1)]],
                         device float* keysOut    [[buffer(2)]],
-                        device uint* valuesOut  [[buffer(3)]],
+                        device uint* valuesOut   [[buffer(3)]],
                         constant uint& num       [[buffer(4)]],
                         ushort lane_id           [[thread_index_in_threadgroup]],
-                        ushort simd_size         [[threads_per_simdgroup]])
-{
+                        ushort simd_size         [[threads_per_simdgroup]]
+) {
     // ping_pongOffsetset + element_index
     threadgroup uint sharedKeys[2 * BUFFER_SIZE];
     threadgroup uint sharedValues[2 * BUFFER_SIZE];
@@ -172,6 +173,97 @@ kernel void radixSortKV(device float* keysIn     [[buffer(0)]],
         if (idx < num) {
             keysOut[idx] = uintToFloat(sharedKeys[srcOffset + idx]);
             valuesOut[idx] = sharedValues[srcOffset + idx];
+        }
+    }
+}
+
+constant uint ITEMS = 32;
+
+kernel void radixSortKV2( device float* keysIn     [[buffer(0)]],
+                          device uint* valuesIn   [[buffer(1)]],
+                          device float* keysOut    [[buffer(2)]],
+                          device uint* valuesOut  [[buffer(3)]],
+                          constant uint& num       [[buffer(4)]],
+                          ushort lane_id           [[thread_index_in_threadgroup]],
+                          ushort simd_size         [[threads_per_simdgroup]]
+) {
+    uint localKeys[ITEMS];
+    uint localValues[ITEMS];
+    
+    // global shuffle within the threadgroup
+    threadgroup uint scratchKeys[1024];
+    threadgroup uint scratchValues[1024];
+
+    // load everything
+    for (uint i = 0; i < ITEMS; i++) {
+        uint idx = lane_id + i * simd_size;
+        if (idx < num) {
+            localKeys[i] = floatToUint(keysIn[idx]);
+            localValues[i] = valuesIn[idx]; // 0xFFFFFFFF (max uint) so they sort to the end naturally
+        } else {
+            localKeys[i] = 0xFFFFFFFF;
+            localValues[i] = 0;
+        }
+    }
+
+    // sort loop for 32 bits
+    for (int bit = 0; bit < 32; bit++) {
+        
+        // count zeros
+        uint totalZeros = 0;
+        for (uint i = 0; i < ITEMS; i++) {
+            totalZeros += simd_sum(((localKeys[i] >> bit) & 1) ? 0 : 1);
+        }
+
+        // calculate all target indices first
+        uint targetIndices[ITEMS];
+        uint runningZeros = 0;
+        
+        for (uint i = 0; i < ITEMS; i++) {
+            bool isZero = !((localKeys[i] >> bit) & 1);
+            
+            // calculate rank of this element within the current row (0..31)
+            uint localRank = simd_prefix_exclusive_sum(isZero ? 1 : 0);
+            
+            // broadcast the number of zeros of this row which lives in the last lane
+            uint rowZeros = simd_broadcast(localRank + (isZero ? 1 : 0), 31);
+            uint globalIdx = (lane_id + i * 32);
+            
+            uint targetIdx;
+            if (isZero) {
+                targetIdx = runningZeros + localRank; // write at (zeros seen previously) + (zeros to my left)
+            } else {
+                targetIdx = totalZeros + (globalIdx - (runningZeros + localRank));
+            }
+            
+            targetIndices[i] = targetIdx;
+            
+            runningZeros += rowZeros;
+        }
+
+        for (uint i = 0; i < ITEMS; i++) {
+            scratchKeys[targetIndices[i]] = localKeys[i];
+            scratchValues[targetIndices[i]] = localValues[i];
+        }
+        
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        
+        // read back the data into registers for the next bit
+        for (uint i = 0; i < ITEMS; i++) {
+            uint globalIdx = (lane_id + i * 32);
+            localKeys[i] = scratchKeys[globalIdx];
+            localValues[i] = scratchValues[globalIdx];
+        }
+        
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+
+    // store result
+    for (uint i = 0; i < ITEMS; i++) {
+        uint idx = lane_id + i * simd_size;
+        if (idx < num) {
+            keysOut[idx] = uintToFloat(localKeys[i]);
+            valuesOut[idx] = localValues[i];
         }
     }
 }

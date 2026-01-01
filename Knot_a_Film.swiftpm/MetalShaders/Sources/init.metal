@@ -35,7 +35,7 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
     
     for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint idx = base + local_base + i;
-        vals[i] = (idx < edgeIndiciesData.numBodies) ? offsets[idx] : 0;
+        vals[i] = (idx < edgeIndiciesData.size) ? offsets[idx] : 0;
         sum += vals[i];
     }
 
@@ -75,7 +75,7 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
         uint local_idx = local_base + i;
         uint global_idx = base + local_idx;
 
-        if (global_idx < edgeIndiciesData.numBodies) {
+        if (global_idx < edgeIndiciesData.size) {
             int prefixSum = shared[local_idx] + carry;
             bodyOffsets.data[global_idx] = prefixSum;
             

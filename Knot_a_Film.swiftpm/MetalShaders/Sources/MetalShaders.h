@@ -59,13 +59,14 @@
 
 #define EDGE_INDICIES_IDX           17
 #define EDGE_BODY_IDX               18
-
+#define EDGE_ANGLES_IDX             19
+#define EDGE_INDICIES_SORTED_IDX    20
 
 // MARK: Other Buffer Indices
 
-#define MUTEX_IDX                   20
-#define SCREEN_TRANSFORM_IDX        21
-#define PHYSICS_PARAMS_IDX          22
+#define MUTEX_IDX                   21
+#define SCREEN_TRANSFORM_IDX        22
+#define PHYSICS_PARAMS_IDX          23
 
 // MARK: Generic
 struct ScreenTransform {
@@ -98,17 +99,20 @@ struct GraphParams {
     struct PhysicsParams physics;
 };
 
-// MARK: Nodes
-template <typename T>
-struct NodeMemberData {
-    uint32_t numNodes;
-    T data[MAX_NODES];
+template <size_t ArraySize, typename T>
+struct ArrayData {
+    uint32_t size;
+    T data[ArraySize];
 };
 
-template struct NodeMemberData<simd_float2>;
-template struct NodeMemberData<float>;
-template struct NodeMemberData<uint32_t>;
-template struct NodeMemberData<bool>;
+// MARK: Nodes
+template <typename T>
+using NodeMemberData = ArrayData<MAX_NODES, T>;
+
+template struct ArrayData<MAX_NODES, simd_float2>;
+template struct ArrayData<MAX_NODES, float>;
+template struct ArrayData<MAX_NODES, uint32_t>;
+template struct ArrayData<MAX_NODES, bool>;
 
 using NodeMemberDataFloat2 = NodeMemberData<simd_float2>;
 using NodeMemberDataFloat = NodeMemberData<float>;
@@ -117,31 +121,23 @@ using NodeMemberDataBool = NodeMemberData<bool>;
 
 // MARK: Bodies
 template <typename T>
-struct BodyMemberData {
-    uint32_t numBodies;
-    T data[MAX_BODIES];
-};
+using BodyMemberData = ArrayData<MAX_BODIES, T>;
 
-template struct BodyMemberData<float>;
-template struct BodyMemberData<simd_float2>;
-template struct BodyMemberData<uint32_t>;
+template struct ArrayData<MAX_BODIES, float>;
+template struct ArrayData<MAX_BODIES, simd_float2>;
+template struct ArrayData<MAX_BODIES, uint32_t>;
 
 using BodyMemberDataFloat = BodyMemberData<float>;
 using BodyMemberDataFloat2 = BodyMemberData<simd_float2>;
 using BodyMemberDataUInt32 = BodyMemberData<uint32_t>;
 
-// MARK: Bodies
+// MARK: Edges
 template <typename T>
-struct EdgesMemberData {
-    uint32_t numBodies;
-    T data[MAX_BODIES * MAX_EDGES];
-    //uint32_t connections[MAX_EDGES]; swift fails to regonize this as a valid member of this type if it exceeds a certain size (1024 is ok)
-};
+using EdgesMemberData = ArrayData<MAX_BODIES * MAX_EDGES, T>;
 
-template struct EdgesMemberData<uint32_t>;
+template struct ArrayData<MAX_BODIES * MAX_EDGES, uint32_t>;
 
 using EdgesMemberDataUInt32 = EdgesMemberData<uint32_t>;
-
 
 #ifdef __METAL_VERSION__
 

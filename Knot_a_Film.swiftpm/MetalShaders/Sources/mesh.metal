@@ -40,7 +40,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                              constant EdgesMemberData<uint>& edgesIndiciesData [[buffer(EDGE_INDICIES_IDX)]],
                              uint gid [[thread_position_in_grid]])
 {
-    if (gid >= bodyPositionsData.numBodies) {
+    if (gid >= bodyPositionsData.size) {
         return;
     }
     
@@ -48,7 +48,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     
     biPosition = (biPosition * transform.scale) + transform.offset;
     
-    if (gid < edgesIndiciesData.numBodies - 1) {
+    if (gid < edgesIndiciesData.size - 1) {
         uint startIdx = offsets.data[gid];
         uint endIdx = offsets.data[gid + 1];
         uint numConns = endIdx - startIdx;

@@ -10,8 +10,7 @@ import CoreML
             //NBodyView()
             Circle()
                 .onAppear {
-                    MetalTests.sortKVTest()
-                    MetalTests.sortTest()
+                    MetalTests.sortKV2Test()
                 }
         }
     }
