@@ -23,7 +23,7 @@ extension GraphParams {
         p.leafLimit = (UInt32(pow(4.0, Double(p.maxDepth))) - 1) / 3
         
         p.blockSize = 32
-        p.useBarnes = true
+        p.useBarnes = false
         p.computeEdges = true
         
         p.physics.springConstant = 1.0

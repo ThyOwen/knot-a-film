@@ -21,12 +21,16 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
                             ushort tid [[thread_index_in_threadgroup]],
                             ushort lane [[thread_index_in_simdgroup]],
                             ushort simd_id [[simdgroup_index_in_threadgroup]],
-                            ushort tg_id [[threadgroup_position_in_grid]],
+                            ushort bid [[threadgroup_position_in_grid]],
                             ushort simdgroups_per_threadgroup [[simdgroups_per_threadgroup]],
                             ushort threads_per_threadgroup [[threads_per_threadgroup]]
 ) {
-
-    const uint base = tg_id * (threads_per_threadgroup * ELEMENTS_PER_THREAD);
+    uint gid = bid * threads_per_threadgroup + tid;
+    
+    if (gid >= numBodies)
+        return;
+    
+    const uint base = bid * (threads_per_threadgroup * ELEMENTS_PER_THREAD);
     const uint local_base = tid * ELEMENTS_PER_THREAD;
 
     // Load and sum elements from offsets

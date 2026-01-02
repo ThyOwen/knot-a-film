@@ -1,6 +1,16 @@
 import MetalKit
 import SharedWithMetal
 
+struct GraphPrintParams {
+    let debugNodes : Bool = false
+    let debugBodies : Bool = false
+    let debugEdges : Bool = false
+    let benchmark : Bool = false
+    
+    var isDebugEnabled : Bool {
+        return self.debugNodes || self.debugBodies || self.debugEdges
+    }
+}
 
 public final class GraphRenderer : NSObject, MTKViewDelegate {
     
@@ -30,11 +40,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     public var offsetsBuffer : MTLBuffer
             
     private var params : GraphParams
+    private let printParams : GraphPrintParams
     
     var bodiesInitialized : Bool = false
-    let benchmarkOnly : Bool = false
-    let counterSampleBuffer : MTLCounterSampleBuffer
-    var sampleIndex = 0
 
     var prevIndicies : [UInt32] = []
     
@@ -44,10 +52,16 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     public init(edges: consuming [UInt32], offsets: consuming [UInt32]) {
         
+        if edges.isEmpty || offsets.isEmpty {
+            fatalError("inputs are empty")
+        }
+        
         let numBodies = UInt32(offsets.count)
         let numEdges = UInt32(edges.count) + 1 // add one for the sentenial
 
+        
         self.params = GraphParams.makeDefault(numBodies: numBodies, numEdges: numEdges)
+        self.printParams = GraphPrintParams()
         
         let device = MTLCreateSystemDefaultDevice()!
         
@@ -139,20 +153,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.sortEdgeAnglesPipeline = try! device.makeComputePipelineState(function: sortEdgeAnglesFunction)
         
         self.commandQueue = device.makeCommandQueue()!
-        
-        let counterSet = device.counterSets?.first {
-            $0.name == MTLCommonCounterSet.timestamp.rawValue
-        }
 
-        let sampleCount = 16  // enough for all stages
-        let descriptor = MTLCounterSampleBufferDescriptor()
-        descriptor.counterSet = counterSet
-        descriptor.storageMode = .shared
-        descriptor.sampleCount = sampleCount
-
-        self.counterSampleBuffer = try! device.makeCounterSampleBuffer(descriptor: descriptor)
-
-        
         self.device = device
         super.init()
     }
@@ -337,7 +338,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.edgesData.edgeTerminationsBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_IDX))
         encoder.setBuffer(self.edgesData.edgeTerminationsSortedBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_SORTED_IDX))
 
-        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
+        //let gridSize = MTLSize(width: (Int(params.numEdges) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
+        let gridSize = MTLSize(width: Int(params.numEdges), height: 1, depth: 1)
+
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
     }
@@ -356,7 +359,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         renderEncoder.setVertexBuffer(self.nodeData.bottomRightBuffer, offset: 0, index: Int(NODE_BOTTOM_RIGHT_IDX))
         
         renderEncoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: Int(self.params.numNodes) * 8)
-        
+        print("draw")
+
         renderEncoder.setRenderPipelineState(self.bodyLineRenderPipeline)
         renderEncoder.setObjectBuffer(self.edgesData.edgeTerminationsSortedBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_SORTED_IDX))
         renderEncoder.setObjectBuffer(self.edgesData.edgeSourcesBuffer, offset: 0, index: Int(EDGE_SOURCES_IDX))
@@ -382,7 +386,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         guard let drawable = view.currentDrawable, let descriptor = view.currentRenderPassDescriptor else {
             return
         }
-        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        
+        guard let commandBuffer = self.commandQueue.makeCommandBuffer() else { return }
         
         if !self.bodiesInitialized {
             self.runStage(name: "Initialize Bodies", on: commandBuffer) { self.initalizeBodies(commandBuffer: $0) }
@@ -399,7 +404,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.runStage(name: "Compute Forces", on: commandBuffer) { self.computeForces(commandBuffer: $0) }
         self.runStage(name: "Sort Angles", on: commandBuffer) { self.sortEdgeAngles(commandBuffer: $0) }
         
-        guard !self.benchmarkOnly else {
+        guard !self.printParams.benchmark else {
             commandBuffer.commit()
             commandBuffer.waitUntilCompleted()
             return
@@ -410,18 +415,26 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         commandBuffer.present(drawable)
         commandBuffer.commit()
         
-        commandBuffer.waitUntilCompleted()
+        if self.printParams.isDebugEnabled {
+            commandBuffer.waitUntilCompleted()
+        }
                 
-        print("draw")
-        //self.printBodies()
-        self.printEdges()
+        if self.printParams.debugEdges {
+            self.printEdges()
+        }
+        if self.printParams.debugBodies {
+            self.printBodies()
+        }
+        if self.printParams.debugEdges {
+            self.printEdges()
+        }
     }
     
     // MARK: - Debug
     
     private func runStage(name: String, on commandBuffer : MTLCommandBuffer, _ encode: (MTLCommandBuffer) -> Void) {
         encode(commandBuffer)
-        if self.benchmarkOnly {
+        if self.printParams.benchmark {
             commandBuffer.addCompletedHandler { completedBuffer in
                 let startTime = completedBuffer.gpuStartTime
                 let endTime = completedBuffer.gpuEndTime

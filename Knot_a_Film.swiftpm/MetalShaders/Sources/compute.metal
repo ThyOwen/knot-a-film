@@ -519,7 +519,6 @@ inline void computeEdgesForce( const thread float2& bodyPos,
         
     for (int base = 0; base < (int)numConns; base += threads_per_simdgroup) {
         uint baseIdx = base + simd_lane_id;
-        uint globalEdgeIdx = startIdx + baseIdx;
         
         float2 otherPos;
         if (baseIdx < numConns) {
@@ -529,29 +528,29 @@ inline void computeEdgesForce( const thread float2& bodyPos,
             otherPos = { 0.0f, 0.0f };
         }
         
-        if (baseIdx < numConns) {
-            float2 delta = otherPos - bodyPos;
-            float angle = atan2(delta.y, delta.x);
-            
-            edgeAnglesData.data[globalEdgeIdx] = floatToUInt(angle);
-        }
-        
         simdgroup_barrier(mem_flags::mem_threadgroup);
         
         // compute forces
         for (int lane = 0; lane < threads_per_simdgroup; ++lane) {
             uint edgeIdx = base + lane;
+            uint insertIdx = edgeIdx + startIdx;
             
-            if (edgeIdx > numConns)
-                //edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
+            if (edgeIdx >= numConns)
                 continue;
-            
+
             float2 pos = simd_broadcast(otherPos, lane);
             
             float2 delta = pos - bodyPos;
             float distanceSquared = dot(delta, delta) + physics.epsilon;
             float distance = sqrt(distanceSquared);
-                        
+            
+
+            if (edgeIdx < numConns) {
+                edgeAnglesData.data[insertIdx] = floatToUInt(atan2(delta.y, delta.x) * 100);
+            } else {
+                edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
+            }
+            
             if (distance > physics.epsilon && computeEdges) {
                 float2 direction = delta / distance;
                 float restLength = physics.edgeAttraction;
@@ -594,9 +593,8 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
 ) {
     uint gid = bid * threads_per_threadgroup + tid;
     
-    if (gid >= numBodies) {
+    if (gid >= numBodies)
         return;
-    }
 
     uint bodyInitialIdx = initialIdx.data[gid];
     float2 bodyPos = position.data[gid];
@@ -648,7 +646,7 @@ kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedD
                             ushort lane_id [[thread_index_in_threadgroup]],
                             ushort simd_size [[threads_per_simdgroup]]
 ) {
-    if (gid > numBodies)
+    if (gid >= numBodies)
         return;
     
     uint startIdx = bodyOffsets.data[gid];

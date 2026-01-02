@@ -33,6 +33,7 @@ struct FragmentIn {
 using PointMeshType = metal::mesh<PointVertexOut, PrimOut, 256, 256, metal::topology::point>;
 using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::line>;
 
+
 [[object]] void objectShader( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
                               constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
                               constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
@@ -68,12 +69,17 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     float2 sourcePoint = bodyPositions.data[sourceIdx];
 
     float2 midpoint = (terminationPoint + sourcePoint) / 2;
+    float2 delta = terminationPoint - sourcePoint;
+    float theta = atan2(delta.y, delta.x);
+
+    float width = 0.05;
+    float2 perpendicular = float2(-delta.y, delta.x) / length(delta);
+    float2 joint = midpoint - (perpendicular * width);
     
-    float2 extra = midpoint + 1.0;
-    
+    //screenspace
     float2 midpoint_t = (midpoint * transform.scale) + transform.offset;
     float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
-    float2 extra_t = (extra * transform.scale) + transform.offset;
+    float2 extra_t = (joint * transform.scale) + transform.offset;
     
     payload.midpoint[tid] = midpoint_t;
     payload.origin[tid] = origin_t;
