@@ -5,7 +5,7 @@
 
 using namespace metal;
 
-#define ELEMENTS_PER_THREAD 4
+#define ELEMENTS_PER_THREAD ELEMENTS_PER_THREAD_INTIALIZE_EDGES
 
 //this computes the prefix sums from the offsets and then uses those to write edges to device memory
 kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],

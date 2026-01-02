@@ -66,6 +66,11 @@
 #define SCREEN_TRANSFORM_IDX        22
 #define PHYSICS_PARAMS_IDX          23
 
+//MARK: Other
+
+#define ELEMENTS_PER_THREAD_INTIALIZE_EDGES 4
+
+
 // MARK: Generic
 struct ScreenTransform {
     simd_float2 offset;

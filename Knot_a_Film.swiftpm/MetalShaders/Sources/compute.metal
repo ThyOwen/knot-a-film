@@ -519,6 +519,7 @@ inline void computeEdgesForce( const thread float2& bodyPos,
         
     for (int base = 0; base < (int)numConns; base += threads_per_simdgroup) {
         uint baseIdx = base + simd_lane_id;
+        uint globalEdgeIdx = startIdx + baseIdx;
         
         float2 otherPos;
         if (baseIdx < numConns) {
@@ -526,6 +527,13 @@ inline void computeEdgesForce( const thread float2& bodyPos,
             otherPos = position.data[otherIdx];
         } else {
             otherPos = { 0.0f, 0.0f };
+        }
+        
+        if (baseIdx < numConns) {
+            float2 delta = otherPos - bodyPos;
+            float angle = atan2(delta.y, delta.x);
+            
+            edgeAnglesData.data[globalEdgeIdx] = floatToUInt(angle);
         }
         
         simdgroup_barrier(mem_flags::mem_threadgroup);
@@ -538,16 +546,12 @@ inline void computeEdgesForce( const thread float2& bodyPos,
                 //edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
                 continue;
             
-            uint insertIdx = edgeIdx + startIdx;
-
             float2 pos = simd_broadcast(otherPos, lane);
             
             float2 delta = pos - bodyPos;
             float distanceSquared = dot(delta, delta) + physics.epsilon;
             float distance = sqrt(distanceSquared);
-            
-            edgeAnglesData.data[insertIdx] = floatToUInt(atan2(delta.y, delta.x));
-            
+                        
             if (distance > physics.epsilon && computeEdges) {
                 float2 direction = delta / distance;
                 float restLength = physics.edgeAttraction;
@@ -644,7 +648,7 @@ kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedD
                             ushort lane_id [[thread_index_in_threadgroup]],
                             ushort simd_size [[threads_per_simdgroup]]
 ) {
-    if (gid >= numBodies)
+    if (gid > numBodies)
         return;
     
     uint startIdx = bodyOffsets.data[gid];

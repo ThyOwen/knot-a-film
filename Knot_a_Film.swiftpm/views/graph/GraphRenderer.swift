@@ -1,6 +1,7 @@
 import MetalKit
 import SharedWithMetal
 
+
 public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     let device : MTLDevice
@@ -35,6 +36,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     let counterSampleBuffer : MTLCounterSampleBuffer
     var sampleIndex = 0
 
+    var prevIndicies : [UInt32] = []
     
     public var screenTransform : ScreenTransform = .init(offset: .zero, scale: .init(1.0, 1.0))
     
@@ -358,12 +360,13 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         renderEncoder.setRenderPipelineState(self.bodyLineRenderPipeline)
         renderEncoder.setObjectBuffer(self.edgesData.edgeTerminationsSortedBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_SORTED_IDX))
         renderEncoder.setObjectBuffer(self.edgesData.edgeSourcesBuffer, offset: 0, index: Int(EDGE_SOURCES_IDX))
+        renderEncoder.setObjectBuffer(self.edgesData.edgeTerminationsBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_IDX))
+
         renderEncoder.setObjectBuffer(self.bodyData.positionBuffer, offset: 0, index: Int(BODY_POSITION_IDX))
         renderEncoder.setObjectBuffer(self.bodyData.offsetsBuffer, offset: 0, index: Int(BODY_EDGE_OFFSETS_IDX))
         renderEncoder.setObjectBuffer(self.transformBuffer, offset: 0, index: Int(SCREEN_TRANSFORM_IDX))
-
         
-        let gridSize = MTLSize(width: Int(params.numEdges), height: 1, depth: 1)
+        let gridSize = MTLSize(width: (Int(params.numEdges) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
         renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
         
         renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
@@ -406,10 +409,12 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
         commandBuffer.present(drawable)
         commandBuffer.commit()
+        
+        commandBuffer.waitUntilCompleted()
                 
         print("draw")
         //self.printBodies()
-        //self.printEdges()
+        self.printEdges()
     }
     
     // MARK: - Debug
@@ -481,12 +486,15 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let bodyIdxPtr = self.edgesData.edgeSourcesBuffer.contents().assumingMemoryBound(to: UInt32.self)
         let count = Int(self.params.numEdges)
 
+        var indices : [UInt32] = []
         print("\n=== EDGES DEBUG ===")
         for i in 0..<count {
             let edgeIdx = edgeIdxPtr[i]
             let sortedEdgeIdx = sortedEdgeIdxPtr[i]
             let angle = edgeAnglesPtr[i]
             let bodyIdx = bodyIdxPtr[i]
+            
+            indices.append(sortedEdgeIdx)
 
             print("""
             [\(i)] EdgeIdx=\(edgeIdx), \
@@ -495,6 +503,20 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
             BodyIdx=\(bodyIdx)
             """)
         }
+        
+        
+        if !self.prevIndicies.isEmpty {
+            zip(indices, self.prevIndicies).enumerated().forEach { idx, val in
+                let current = val.0
+                let previous = val.1
+                if current != previous {
+                    print("\n=== INDEX CHANGE ===")
+                    print("\(idx): \(current) -> \(previous)")
+                }
+            }
+        }
+        
+        self.prevIndicies = indices
     }
 
     private func printBodies() {
