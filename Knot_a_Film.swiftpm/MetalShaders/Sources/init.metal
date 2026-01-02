@@ -11,9 +11,9 @@ using namespace metal;
 kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
                             const device uint* __restrict offsets [[buffer(1)]],
                                  
-                            device BodyMemberData<uint>& bodyOffsets [[buffer(BODY_OFFSETS_IDX)]], //should probably by intialized directly
-                            device EdgesMemberData<uint>& edgeIndiciesData [[buffer(EDGE_INDICIES_IDX)]],
-                            device EdgesMemberData<uint>& edgeBodyData [[buffer(EDGE_BODY_IDX)]],
+                            device BodyMemberData<uint>& bodyOffsets [[buffer(BODY_EDGE_OFFSETS_IDX)]], //should probably by intialized directly
+                            device EdgeMemberData<uint>& edgeTerminationsData [[buffer(EDGE_TERMINATIONS_IDX)]],
+                            device EdgeMemberData<uint>& edgeSourcesData [[buffer(EDGE_SOURCES_IDX)]],
                               
                             threadgroup int* __restrict__ shared [[threadgroup(0)]],
                             threadgroup int* __restrict__ simdSums [[threadgroup(1)]],
@@ -35,7 +35,7 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
     
     for (short i = 0; i < ELEMENTS_PER_THREAD; ++i) {
         uint idx = base + local_base + i;
-        vals[i] = (idx < edgeIndiciesData.size) ? offsets[idx] : 0;
+        vals[i] = (idx < edgeTerminationsData.size) ? offsets[idx] : 0;
         sum += vals[i];
     }
 
@@ -75,7 +75,7 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
         uint local_idx = local_base + i;
         uint global_idx = base + local_idx;
 
-        if (global_idx < edgeIndiciesData.size) {
+        if (global_idx < edgeTerminationsData.size) {
             int prefixSum = shared[local_idx] + carry;
             bodyOffsets.data[global_idx] = prefixSum;
             
@@ -83,8 +83,8 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
             uint count = vals[i];
             
             for (int k = 0; k < (int)count; ++k) {
-                edgeIndiciesData.data[startIdx + k] = edges[startIdx + k];
-                edgeBodyData.data[startIdx + k] = global_idx;
+                edgeTerminationsData.data[startIdx + k] = edges[startIdx + k];
+                edgeSourcesData.data[startIdx + k] = global_idx;
             }
         }
     }
@@ -96,7 +96,7 @@ kernel void initalizeBodies( device BodyMemberData<float>& mass [[buffer(BODY_MA
                              device BodyMemberData<float2>& velocity [[buffer(BODY_VELOCITY_IDX)]],
                              device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                              device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
-                             constant PhysicsParams& params [[buffer(EDGE_INDICIES_IDX)]],
+                             constant PhysicsParams& params [[buffer(EDGE_TERMINATIONS_IDX)]],
                              uint gid [[thread_position_in_grid]]
 ) {
     if (gid >= numBodies) {

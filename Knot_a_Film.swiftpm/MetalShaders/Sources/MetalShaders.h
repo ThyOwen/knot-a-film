@@ -6,8 +6,6 @@
     #include <cstdint>
 #endif
 
-#define SIMDGROUP_SIZE 32
-
 #define MAX_EDGES 1024
 #define MAX_BODIES 1024
 #define MAX_NODES 349525
@@ -15,12 +13,12 @@
 // MARK: Function Constant Indices
 
 #define FC_NUM_BODIES           0
-#define FC_NUM_EDGES      1
+#define FC_NUM_EDGES            1
 #define FC_NUM_NODES            2
 #define FC_LEAF_LIMIT           3
 #define FC_BLOCK_SIZE           4
 #define FC_USE_BARNES           6
-#define FC_COMPUTE_EDGES  7
+#define FC_COMPUTE_EDGES        7
 
 #define FC_SPRING_CONSTANT      8
 #define FC_EDGE_REPULSION       9
@@ -49,7 +47,7 @@
 #define BODY_VELOCITY_IDX           10
 #define BODY_ACCELERATION_IDX       11
 #define BODY_INITIAL_IDX_IDX        12
-#define BODY_OFFSETS_IDX            13
+#define BODY_EDGE_OFFSETS_IDX       13
 
 #define BODY_MASS_ALT_IDX           14
 #define BODY_POSITION_ALT_IDX       15
@@ -57,10 +55,10 @@
 
 // MARK: Edges Buffer Indicies
 
-#define EDGE_INDICIES_IDX           17
-#define EDGE_BODY_IDX               18
-#define EDGE_ANGLES_IDX             19
-#define EDGE_INDICIES_SORTED_IDX    20
+#define EDGE_TERMINATIONS_IDX        17
+#define EDGE_SOURCES_IDX             18
+#define EDGE_ANGLES_IDX              19
+#define EDGE_TERMINATIONS_SORTED_IDX 20
 
 // MARK: Other Buffer Indices
 
@@ -133,11 +131,11 @@ using BodyMemberDataUInt32 = BodyMemberData<uint32_t>;
 
 // MARK: Edges
 template <typename T>
-using EdgesMemberData = ArrayData<MAX_BODIES * MAX_EDGES, T>;
+using EdgeMemberData = ArrayData<MAX_BODIES * MAX_EDGES, T>;
 
 template struct ArrayData<MAX_BODIES * MAX_EDGES, uint32_t>;
 
-using EdgesMemberDataUInt32 = EdgesMemberData<uint32_t>;
+using EdgeMemberDataUInt32 = EdgeMemberData<uint32_t>;
 
 #ifdef __METAL_VERSION__
 
