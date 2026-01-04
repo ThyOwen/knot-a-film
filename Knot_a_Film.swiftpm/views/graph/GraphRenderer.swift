@@ -57,7 +57,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         }
         
         let numBodies = UInt32(offsets.count)
-        let numEdges = UInt32(edges.count) + 1 // add one for the sentenial
+        let numEdges = UInt32(edges.count) // don't add one BAD IDEA
 
         
         self.params = GraphParams.makeDefault(numBodies: numBodies, numEdges: numEdges)

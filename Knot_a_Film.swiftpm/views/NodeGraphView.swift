@@ -66,16 +66,18 @@ struct NodeGraphView: View {
                 }
             )
     }
-    
-    var nodeView : some View {
-        Canvas(rendersAsynchronously: true) { context, size in
-            
-        }
-    }
-    
+
     var body: some View {
         MetalView()
             .gesture(self.gesture)
+            .onKeyPress(.upArrow) {
+                self.initialScale += 0.1
+                return .handled
+            }
+            .onKeyPress(.downArrow) {
+                self.initialScale -= 0.1
+                return .handled
+            }
             .onChange(of: self.initialOffset) { old, new in
                 let (x, y) : (Float32, Float32) = switch self.panGestureState {
                 case .inactive:
