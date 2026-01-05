@@ -12,7 +12,7 @@ struct Payload {
     float2 intersection[32];
     float2 prevMidpoint[32];
     float2 prevJoint[32];
-    bool mask[32];
+    bool shouldMask[32];
 };
 
 struct PointVertexOut {
@@ -60,48 +60,78 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                                                  
 ) {
     uint gid = bid * threads_per_threadgroup + tid;
-
+    
     if (gid >= numEdges)
         return;
-    
-    uint terminationIdx = edgeTerminationsSorted.data[gid];
+
     uint sourceIdx = edgeSources.data[gid];
+    uint terminationIdx = edgeTerminationsSorted.data[gid];
     
-    uint prevSourceIdx = simd_shuffle_up(sourceIdx, 1);
-    
-    bool isStart = (lane_id == 0) || (sourceIdx != prevSourceIdx);// || (gid == numEdges);
-    
-    float2 terminationPoint = bodyPositions.data[terminationIdx];
     float2 sourcePoint = bodyPositions.data[sourceIdx];
+    float2 terminationPoint = bodyPositions.data[terminationIdx];
 
-    float2 midpoint = (terminationPoint + sourcePoint) / 2;
     float2 delta = terminationPoint - sourcePoint;
-
+    float2 midpoint = (terminationPoint + sourcePoint) * 0.5f;
+    
     float width = 0.05;
-    float2 perpendicular = float2(-delta.y, delta.x) / length(delta);
-    float2 joint = (perpendicular * width);
-    
-    float2 prevJoint = simd_shuffle_up(joint, 1);
+    float len = length(delta) + 1e-6; // avoid div by zero
+    float2 perpendicular = float2(-delta.y, delta.x) / len;
+    float2 joint = perpendicular * width;
+
     float2 prevMidpoint = simd_shuffle_up(midpoint, 1);
-    float2 prevDelta = simd_shuffle_up(delta, 1);
-    
+    float2 prevJoint    = simd_shuffle_up(joint, 1);
+    uint   prevSource   = simd_shuffle_up(sourceIdx, 1);
+    float2 prevDelta    = simd_shuffle_up(delta, 1);
+
+    // seams are breaks in the connectivity of the graph. this could be from the first lane not having a neighbor or changes in the the edge source
+    bool isSimdSeam = (lane_id == 0);
+    bool isSeam = isSimdSeam || (sourceIdx != prevSource);
+
+    if (isSeam) {
+        // to close the loop, the "previous" edge is the last edge of this body.
+        
+        uint startIdx = bodyEdgeOffsets.data[sourceIdx];
+        uint endIdx   = bodyEdgeOffsets.data[sourceIdx + 1];
+        
+        bool isBodyStart = (gid == startIdx);
+        
+        uint prevGid;
+        if (isBodyStart) {
+            prevGid = endIdx - 1; // Wrap to end
+        } else {
+            prevGid = gid - 1;    // Just previous edge (SIMD boundary case)
+        }
+        
+        uint prevTermIdx = edgeTerminationsSorted.data[prevGid];
+        float2 prevTermPos = bodyPositions.data[prevTermIdx];
+        
+        // Recompute 'prev' geometry manually
+        float2 pDelta = prevTermPos - sourcePoint; // source is same
+        float2 pMid = (prevTermPos + sourcePoint) * 0.5f;
+        float pLen = length(pDelta) + 1e-6;
+        float2 pPerp = float2(-pDelta.y, pDelta.x) / pLen;
+        
+        prevDelta    = pDelta;
+        prevMidpoint = pMid;
+        prevJoint    = pPerp * width;
+    }
+
     float2 p1 = prevMidpoint + prevJoint;
-    float2 d1 = prevDelta;
     float2 p2 = midpoint - joint;
+    
+    float2 d1 = prevDelta;
     float2 d2 = delta;
     
-    // Solve for intersection
     float2 p1p2 = p2 - p1;
-    float intersectionCrossProduct = d1.x * d2.y - d1.y * d2.x;
+    float crossProduct = d1.x * d2.y - d1.y * d2.x;
 
     float2 intersection;
-    if (abs(intersectionCrossProduct) < 1e-6) { // lines are parallel, -> use midpoint between edges
-        intersection = (p1 + p2) / 2;
+    if (abs(crossProduct) < 1e-5) {
+        intersection = (p1 + p2) * 0.5f;
     } else {
-        float t = (p1p2.x * d2.y - p1p2.y * d2.x) / intersectionCrossProduct;
+        float t = (p1p2.x * d2.y - p1p2.y * d2.x) / crossProduct;
         intersection = p1 + t * d1;
     }
-    
     //screenspace
     float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
     float2 midpoint_t = (midpoint * transform.scale) + transform.offset;
@@ -116,7 +146,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     payload.intersection[tid] = intersection_t;
     payload.prevJoint[tid] = prevJoint_t;
     payload.prevMidpoint[tid] = prevMidpoint_t;
-    payload.mask[tid] = !isStart;
+    payload.shouldMask[tid] = false;
     
     meshGridProperties.set_threadgroups_per_grid(uint3(1, 1, 1));
 }
@@ -162,7 +192,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     // 6 line primitives per thread
     output.set_primitive_count(count * 6);
 
-    if (!payload.mask[tid])
+    if (payload.shouldMask[tid])
         return;
 
     // 7 vertices per thread

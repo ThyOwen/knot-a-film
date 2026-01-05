@@ -39,7 +39,7 @@ import SharedWithMetal
         
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[..<10])
+        let movies = Array(moviesTotal[0..<10])
         
         var flatEdges: [UInt32] = []
         var offsets: [UInt32] = [] // offsets is a per-body counts array; its length equals number of bodies.
@@ -77,7 +77,6 @@ import SharedWithMetal
         print("highestNumEdges", highestNumEdges)
         print("numOfBodiesWithEdges", numOfBodiesWithEdges)
         
-        let totalEdges = UInt32(flatEdges.count)
         let renderer = GraphRenderer.init(edges: flatEdges, offsets: offsets)
         return Self.init(movies, moviePeople, renderer)
     }

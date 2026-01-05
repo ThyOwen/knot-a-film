@@ -142,6 +142,8 @@ template struct ArrayData<MAX_BODIES * MAX_EDGES, uint32_t>;
 
 using EdgeMemberDataUInt32 = EdgeMemberData<uint32_t>;
 
+// MARK: Utility Functions
+
 #ifdef __METAL_VERSION__
 
 constant uint   numBodies          [[ function_constant(FC_NUM_BODIES) ]];

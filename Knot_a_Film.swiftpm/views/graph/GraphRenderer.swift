@@ -11,46 +11,47 @@ struct GraphPrintParams {
         return self.debugNodes || self.debugBodies || self.debugEdges
     }
 }
-
+@Observable
 public final class GraphRenderer : NSObject, MTKViewDelegate {
     
-    let device : MTLDevice
-    let commandQueue : MTLCommandQueue
+    @ObservationIgnored let device : MTLDevice
+    @ObservationIgnored let commandQueue : MTLCommandQueue
     
-    private var initalizeEdgesPipeline : MTLComputePipelineState
-    private var initalizeBodiesPipeline : MTLComputePipelineState
-    private var resetPipeline : MTLComputePipelineState
-    private var boundingBoxPipeline : MTLComputePipelineState
-    private var constructTreePipeline : MTLComputePipelineState
-    private var computeForcePipeline : MTLComputePipelineState
-    private var sortEdgeAnglesPipeline : MTLComputePipelineState
+    @ObservationIgnored private var initalizeEdgesPipeline : MTLComputePipelineState
+    @ObservationIgnored private var initalizeBodiesPipeline : MTLComputePipelineState
+    @ObservationIgnored private var resetPipeline : MTLComputePipelineState
+    @ObservationIgnored private var boundingBoxPipeline : MTLComputePipelineState
+    @ObservationIgnored private var constructTreePipeline : MTLComputePipelineState
+    @ObservationIgnored private var computeForcePipeline : MTLComputePipelineState
+    @ObservationIgnored private var sortEdgeAnglesPipeline : MTLComputePipelineState
     
-    private var nodeRenderPipeline : MTLRenderPipelineState
-    private var bodyRenderPipeline : MTLRenderPipelineState
-    private var bodyLineRenderPipeline : MTLRenderPipelineState
+    @ObservationIgnored private var nodeRenderPipeline : MTLRenderPipelineState
+    @ObservationIgnored private var bodyRenderPipeline : MTLRenderPipelineState
+    @ObservationIgnored private var bodyLineRenderPipeline : MTLRenderPipelineState
     
-    private var nodeData : NodeBufferGroup
-    private var bodyData : BodyBufferGroup
-    private var edgesData : EdgesBufferGroup
+    @ObservationIgnored private var nodeData : NodeBufferGroup
+    @ObservationIgnored private var bodyData : BodyBufferGroup
+    @ObservationIgnored private var edgesData : EdgesBufferGroup
     
-    private var mutexBuffer : MTLBuffer
-    private var transformBuffer : MTLBuffer
+    @ObservationIgnored private var mutexBuffer : MTLBuffer
+    @ObservationIgnored private var transformBuffer : MTLBuffer
     
-    public var edgesBuffer : MTLBuffer
-    public var offsetsBuffer : MTLBuffer
+    @ObservationIgnored private var edgesBuffer : MTLBuffer
+    @ObservationIgnored private var offsetsBuffer : MTLBuffer
             
-    private var params : GraphParams
-    private let printParams : GraphPrintParams
+    @ObservationIgnored private var params : GraphParams
+    @ObservationIgnored private let printParams : GraphPrintParams
     
-    var bodiesInitialized : Bool = false
+    @ObservationIgnored var bodiesInitialized : Bool = false
 
     var prevIndicies : [UInt32] = []
+    var bodyPositions : [(index: Int, position: CGPoint)] = []
     
     public var screenTransform : ScreenTransform = .init(offset: .zero, scale: .init(1.0, 1.0))
     
     private let threadgroupSize = MTLSize(width: 32, height: 1, depth: 1)
     
-    public init(edges: consuming [UInt32], offsets: consuming [UInt32]) {
+    public init(edges: [UInt32], offsets: consuming [UInt32]) {
         
         if edges.isEmpty || offsets.isEmpty {
             fatalError("inputs are empty")
@@ -207,8 +208,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.bodyData.initialIdxBuffer, offset: 0, index: Int(BODY_INITIAL_IDX_IDX))
         encoder.setBytes(&params.physics, length: MemoryLayout<PhysicsParams>.stride, index: Int(PHYSICS_PARAMS_IDX))
         
-        let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width,
-                               height: 1, depth: 1)
+        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
+
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
         
         encoder.endEncoding()
@@ -227,8 +228,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.nodeData.isLeafBuffer, offset: 0, index: Int(NODE_IS_LEAF_IDX))
         encoder.setBuffer(self.mutexBuffer, offset: 0, index: Int(MUTEX_IDX))
         
-        let gridSize = MTLSize(width: (Int(params.numNodes) + threadgroupSize.width - 1) / threadgroupSize.width,
-                               height: 1, depth: 1)
+        let gridSize = MTLSize(width: Int(params.numNodes), height: 1, depth: 1)
+
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
     }
@@ -323,7 +324,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let perBodyAnglesMemSize = MemoryLayout<Float32>.stride * Int(MAX_EDGES)
         encoder.setThreadgroupMemoryLength(perBodyAnglesMemSize, index: 0)
         
-        let gridSize = MTLSize(width: (Int(params.numBodies) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
+        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
     }
@@ -338,8 +339,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.setBuffer(self.edgesData.edgeTerminationsBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_IDX))
         encoder.setBuffer(self.edgesData.edgeTerminationsSortedBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_SORTED_IDX))
 
-        //let gridSize = MTLSize(width: (Int(params.numEdges) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
-        let gridSize = MTLSize(width: Int(params.numEdges), height: 1, depth: 1)
+        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
 
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
@@ -415,12 +415,14 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         commandBuffer.present(drawable)
         commandBuffer.commit()
         
+        self.updateBodyPositions()
+        
         if self.printParams.isDebugEnabled {
             commandBuffer.waitUntilCompleted()
         }
                 
-        if self.printParams.debugEdges {
-            self.printEdges()
+        if self.printParams.debugNodes {
+            self.printNodes()
         }
         if self.printParams.debugBodies {
             self.printBodies()
@@ -432,6 +434,18 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     
     // MARK: - Debug
     
+    public func updateBodyPositions() {
+        let positionBase = self.bodyData.positionBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
+        let positionPtr = UnsafeBufferPointer(start: positionBase.advanced(by: 1), count: Int(params.numBodies))
+        
+        self.bodyPositions = (0..<Int(params.numBodies)).map { i in
+            let pos = positionPtr[i]
+            let screenX = CGFloat(pos.x * screenTransform.scale.x + screenTransform.offset.x)
+            let screenY = CGFloat(pos.y * screenTransform.scale.y + screenTransform.offset.y)
+            return (index: i, position: CGPoint(x: screenX, y: screenY))
+        }
+    }
+
     private func runStage(name: String, on commandBuffer : MTLCommandBuffer, _ encode: (MTLCommandBuffer) -> Void) {
         encode(commandBuffer)
         if self.printParams.benchmark {
@@ -501,7 +515,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
 
         var indices : [UInt32] = []
         print("\n=== EDGES DEBUG ===")
-        for i in 0..<count {
+        for i in 0...count {
             let edgeIdx = edgeIdxPtr[i]
             let sortedEdgeIdx = sortedEdgeIdxPtr[i]
             let angle = edgeAnglesPtr[i]
@@ -535,11 +549,21 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     private func printBodies() {
         //let massPtr = self.bodyData.massBuffer.contents().assumingMemoryBound(to: Float.self)
         //let radiusPtr = self.bodyData.radiusBuffer.contents().assumingMemoryBound(to: Float.self)
-        let positionPtr = self.bodyData.positionBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
-        let velocityPtr = self.bodyData.velocityBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
-        let accelerationPtr = self.bodyData.accelerationBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
-        let initialIdxPtr = self.bodyData.initialIdxBuffer.contents().assumingMemoryBound(to: UInt32.self)
-        let offsetBufferPtr = self.bodyData.offsetsBuffer.contents().assumingMemoryBound(to: UInt32.self)
+
+        let positionBase = self.bodyData.positionBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
+        let positionPtr = UnsafeBufferPointer(start: positionBase.advanced(by: 1), count: Int(params.numBodies))
+        
+        let velocityBase = self.bodyData.velocityBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
+        let velocityPtr = UnsafeBufferPointer(start: velocityBase.advanced(by: 1), count: Int(params.numBodies))
+        
+        let accelerationBase = self.bodyData.accelerationBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
+        let accelerationPtr = UnsafeBufferPointer(start: accelerationBase.advanced(by: 1), count: Int(params.numBodies))
+        
+        let initialIdxBase = self.bodyData.initialIdxBuffer.contents().assumingMemoryBound(to: UInt32.self)
+        let initialIdxPtr = UnsafeBufferPointer(start: initialIdxBase.advanced(by: 1), count: Int(params.numBodies))
+        
+        let offsetBufferBase = self.bodyData.offsetsBuffer.contents().assumingMemoryBound(to: UInt32.self)
+        let offsetBufferPtr = UnsafeBufferPointer(start: offsetBufferBase.advanced(by: 1), count: Int(params.numBodies) + 1)
         
         print("\n=== BODIES DEBUG ===")
         for i in 0..<Int(self.params.numBodies) {
@@ -551,5 +575,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
             
             print("\(i)]: Position=(\(position.x), \(position.y)), Velocity=(\(velocity.x), \(velocity.y)), Acceleration=(\(acceleration.x), \(acceleration.y)), InitialIdx = \(initialIdx), OffsetIdx = \(offsetIdx)")
         }
+        
+        // Print sentinel
+        print("Sentinel: offsetBufferPtr[\(params.numBodies)] = \(offsetBufferPtr[Int(params.numBodies)])")
     }
 }

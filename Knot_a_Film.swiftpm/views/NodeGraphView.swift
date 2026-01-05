@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import SharedWithMetal
+import MetalKit
 
 extension Bool {
     var intValue: Int {
@@ -35,6 +36,8 @@ struct NodeGraphView: View {
     @State private var initialScale : CGFloat = 1
     @GestureState private var panGestureState : PanGestureState = .inactive
     @GestureState private var zoomGestureState : ZoomGestureState = .inactive
+    
+    @FocusState private var isFocused: Bool
 
     var gesture : some Gesture {
         DragGesture()
@@ -67,9 +70,43 @@ struct NodeGraphView: View {
             )
     }
 
+    var overlay: some View {
+        Canvas { context, size in
+            guard let positions = self.graph.graph?.renderer.bodyPositions else {
+                return
+            }
+            
+            for (index, position) in positions {
+                let x = (position.x + 1.0) * size.width / 2.0
+                let y = (1.0 - position.y) * size.height / 2.0
+                
+                let point = CGPoint(x: x, y: y)
+                
+                context.fill(
+                    Circle().path(in: CGRect(x: point.x - 12, y: point.y - 12, width: 24, height: 24)),
+                    with: .color(.black.opacity(0.7))
+                )
+                
+                let text = Text("\(index)")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                
+                context.draw(text, at: point)
+            }
+        }
+    }
+    
     var body: some View {
         MetalView()
+            .overlay {
+                self.overlay
+            }
             .gesture(self.gesture)
+            .focusable()
+            .focused($isFocused)
+            .onAppear {
+                isFocused = true
+            }
             .onKeyPress(.upArrow) {
                 self.initialScale += 0.1
                 return .handled
@@ -97,25 +134,10 @@ struct NodeGraphView: View {
                 }
                 
                 self.graph.graph?.renderer.screenTransform.scale = .init(scale, scale)
-
+                
             }
     }
-    
-    private static func colorFromText(_ text: String, saturation : Double = 0.6, brightness : Double = 0.8) -> Color {
-        // Step 1: Hash the string into a UInt32
-        var hash = UInt32(5381)
-        for char in text.utf8 {
-            hash = ((hash << 5) &+ hash) &+ UInt32(char)
-        }
-        
-        // Step 2: Map hash to a hue (0–1)
-        let hue = Double(hash % 360) / 360.0
-        
-        // Step 3: Create color with fixed saturation & brightness
-        return Color(hue: hue, saturation: saturation, brightness: brightness)
-    }
 }
-
 
 #if DEBUG
 

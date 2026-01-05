@@ -546,7 +546,10 @@ inline void computeEdgesForce( const thread float2& bodyPos,
             
 
             if (edgeIdx < numConns) {
-                edgeAnglesData.data[insertIdx] = floatToUInt(atan2(delta.y, delta.x) * 100);
+                float angle = atan2(delta.y, delta.x);
+                float normalizedAngle = (angle + M_PI_F) / (2.0f * M_PI_F);
+                
+                edgeAnglesData.data[insertIdx] = floatToUInt(angle);
             } else {
                 edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
             }
