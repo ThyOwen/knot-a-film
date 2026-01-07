@@ -22,9 +22,7 @@ struct MetalView : UIViewRepresentable {
         mtkView.delegate = context.coordinator
         mtkView.preferredFramesPerSecond = 120
         
-        if let metalDevice = MTLCreateSystemDefaultDevice() {
-            mtkView.device = metalDevice
-        }
+        mtkView.device = context.coordinator.device
         
         mtkView.framebufferOnly = false
         mtkView.drawableSize = mtkView.frame.size

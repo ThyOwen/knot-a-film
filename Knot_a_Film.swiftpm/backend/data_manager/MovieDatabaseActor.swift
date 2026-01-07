@@ -117,45 +117,61 @@ public final actor MovieDatabaseActor {
         try await closure(&results, self)
     }
     
-    public static func loadModel(overwrite : Bool) async throws -> MovieDatabaseActor {
-        
-        let documentDirectoryURL = try FileManager.default.url(for: .documentDirectory,
-                                                               in: .userDomainMask,
-                                                               appropriateFor: .applicationDirectory,
-                                                               create: true)
+    public static func loadModel(overwrite: Bool) async throws -> MovieDatabaseActor {
+        let fileManager = FileManager.default
 
+        let documentDirectoryURL = try fileManager.url(for: .documentDirectory,
+                                                       in: .userDomainMask,
+                                                       appropriateFor: nil,
+                                                       create: true)
+        
         let databaseURL = documentDirectoryURL.appendingPathComponent("user.store")
         
+        print("Target Database URL: \(databaseURL.path)")
+
         if overwrite {
-            try? FileManager.default.removeItem(at: databaseURL)
+            if fileManager.fileExists(atPath: databaseURL.path) {
+                print("Overwrite requested. Deleting existing database at: \(databaseURL.path)")
+                try fileManager.removeItem(at: databaseURL)
+            } else {
+                print("Overwrite requested, but no existing database was found to delete.")
+            }
         }
-        
-        let databaseFileExists = (try? databaseURL.checkResourceIsReachable()) ?? false
 
-        //copy the file if it doesn't exist
-        if let defaultStoreURL = Bundle.main.url(forResource: "default", withExtension: "store"), !databaseFileExists {
-            try FileManager.default.copyItem(at: defaultStoreURL, to: databaseURL)
+        var shouldParseCSV = false
+        
+        if !fileManager.fileExists(atPath: databaseURL.path) {
+            print("User store not found. Attempting to seed from bundle...")
+            
+            if let defaultStoreURL = Bundle.main.url(forResource: "default", withExtension: "store") {
+                print("Found 'default.store' in bundle. Copying to user directory...")
+                try fileManager.copyItem(at: defaultStoreURL, to: databaseURL)
+            } else {
+                shouldParseCSV = true
+            }
+        } else {
+            print("Existing 'user.store' found. Loading existing data.")
         }
-        
-        let modelSchema : Schema = .init([Movie.self, MoviePerson.self])
 
-        let modelConfiguration = ModelConfiguration(schema: modelSchema, url: databaseURL, allowsSave: true, cloudKitDatabase: .none)
+        print("Initializing ModelContainer...")
+        let modelSchema = Schema([Movie.self, MoviePerson.self])
+        let modelConfiguration = ModelConfiguration(
+            schema: modelSchema,
+            url: databaseURL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
 
         let modelContainer = try ModelContainer(
             for: modelSchema,
-            configurations: consume modelConfiguration
+            configurations: modelConfiguration
         )
-
-        let defaultStoreExists = (try? Bundle.main.url(forResource: "default", withExtension: "store")?.checkResourceIsReachable()) ?? false
         
-        if !databaseFileExists && !defaultStoreExists {
+        if shouldParseCSV {
+            print("'default.store' not found in bundle. A new empty database will be created.")
             try await DataManager.createDatabase(with: modelContainer)
-            return try await self.loadModel(overwrite: false)
-        } else {
-            let databaseActor = MovieDatabaseActor(modelContainer: consume modelContainer)
-            
-            return databaseActor
         }
-    }
 
+        return MovieDatabaseActor(modelContainer: modelContainer)
+    }
 }

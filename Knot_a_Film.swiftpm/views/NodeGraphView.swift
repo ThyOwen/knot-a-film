@@ -44,8 +44,8 @@ struct NodeGraphView: View {
             .updating(self.$panGestureState) { gesture, state, transaction in
                 
                 let proposedOffset = CGSize(
-                    width: (initialOffset.width + gesture.translation.width) / 1000,
-                    height: (initialOffset.height + gesture.translation.height) / 1000
+                    width: (initialOffset.width + gesture.translation.width) / 100,
+                    height: (initialOffset.height + gesture.translation.height) / 100
                 )
 
                 state = .active(translation: proposedOffset)
@@ -105,7 +105,7 @@ struct NodeGraphView: View {
             .focusable()
             .focused($isFocused)
             .onAppear {
-                isFocused = true
+                self.isFocused = true
             }
             .onKeyPress(.upArrow) {
                 self.initialScale += 0.1

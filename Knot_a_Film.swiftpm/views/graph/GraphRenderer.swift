@@ -373,8 +373,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let gridSize = MTLSize(width: (Int(params.numEdges) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
         renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
         
-        renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
-        renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
+        //renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
+        //renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
         
         renderEncoder.endEncoding()
     }
@@ -404,12 +404,6 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.runStage(name: "Compute Forces", on: commandBuffer) { self.computeForces(commandBuffer: $0) }
         self.runStage(name: "Sort Angles", on: commandBuffer) { self.sortEdgeAngles(commandBuffer: $0) }
         
-        guard !self.printParams.benchmark else {
-            commandBuffer.commit()
-            commandBuffer.waitUntilCompleted()
-            return
-        }
-
         self.runStage(name: "Render", on: commandBuffer) { self.render(with: descriptor, commandBuffer: $0) }
 
         commandBuffer.present(drawable)

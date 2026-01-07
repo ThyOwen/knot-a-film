@@ -36,14 +36,15 @@ public enum ViewModelError : Error {
     public func setup() {
         Task(priority: .background) {
             do {
-                let databaseActor = try await MovieDatabaseActor.loadModel(overwrite: false)
+                print("Starting")
+                let databaseActor = try await MovieDatabaseActor.loadModel(overwrite: true)
+                
+                try await Self.testFetch(on: databaseActor)
                 
                 let searchEngine = try await SearchEngine.create(with: databaseActor)
                 let recommendationEngine = try await RecomendationEngine.create(with: databaseActor)
                 let graphManager = try await GraphManager.create(with: databaseActor)
                         
-                try await Self.testFetch(on: databaseActor)
-                
                 await MainActor.run {
                     self.databaseActor = consume databaseActor
                     self.recommendationEngine = recommendationEngine
@@ -84,6 +85,8 @@ public enum ViewModelError : Error {
         let movies = try await databaseActor.withModelContext { modelContext in
             try modelContext.fetch(directorFetch)
         }
+        
+        print("numMovies", movies.count)
 
         for idx in movies.indices {
             movies[idx].dateWatched = .now
