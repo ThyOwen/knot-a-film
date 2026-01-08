@@ -70,7 +70,7 @@ let package = Package(
             plugins: ["MetalCompilerPlugin"]
         )
     ],
-    swiftLanguageVersions: [.version("6.2")],
+    swiftLanguageModes: [.version("6.2")],
     cLanguageStandard: .c18,
     cxxLanguageStandard: .cxx20
 )

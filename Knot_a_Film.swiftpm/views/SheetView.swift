@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 public enum SheetViewGestureState {
     case inactive
@@ -69,7 +72,22 @@ struct SheetView<Content: View>: View {
         #if os(macOS)
             let maxHeight = (NSScreen.main?.frame.height ?? 400) * maxHeightFraction
         #elseif os(iOS)
-            let maxHeight = UIScreen.main.bounds.height * maxHeightFraction
+            #if targetEnvironment(macCatalyst)
+                
+                let screenHeight: CGFloat
+
+                let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+
+                if let windowScene {
+                    screenHeight = windowScene.screen.bounds.height
+                } else {
+                    screenHeight = 600
+                }
+
+                let maxHeight = screenHeight * maxHeightFraction
+            #else
+                let maxHeight = UIScreen.main.bounds.height * maxHeightFraction
+            #endif
         #endif
         self.maxHeight = maxHeight
         self.minHeight = minHeight
@@ -172,3 +190,4 @@ fileprivate struct TestSheetView : View {
 #Preview {
     TestSheetView()
 }
+

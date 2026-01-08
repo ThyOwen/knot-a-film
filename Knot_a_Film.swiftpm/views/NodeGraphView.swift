@@ -39,37 +39,6 @@ struct NodeGraphView: View {
     
     @FocusState private var isFocused: Bool
 
-    var gesture : some Gesture {
-        DragGesture()
-            .updating(self.$panGestureState) { gesture, state, transaction in
-                
-                let proposedOffset = CGSize(
-                    width: (initialOffset.width + gesture.translation.width) / 100,
-                    height: (initialOffset.height + gesture.translation.height) / 100
-                )
-
-                state = .active(translation: proposedOffset)
-            }
-            .onEnded { gesture in
-                
-                let proposedOffset = CGSize(
-                    width: (initialOffset.width + gesture.translation.width) / 1000,
-                    height: (initialOffset.height + gesture.translation.height) / 1000
-                )
-                
-                self.initialOffset = proposedOffset
-            }
-            .simultaneously(with: MagnifyGesture()
-                .updating(self.$zoomGestureState) { gesture, state, transaction in
-
-                    state = .active(scale: gesture.magnification)
-                }
-                .onEnded { gesture in
-                    self.initialScale *= gesture.magnification
-                }
-            )
-    }
-
     var overlay: some View {
         Canvas { context, size in
             guard let positions = self.graph.graph?.renderer.bodyPositions else {
@@ -101,41 +70,37 @@ struct NodeGraphView: View {
             .overlay {
                 self.overlay
             }
-            .gesture(self.gesture)
             .focusable()
             .focused($isFocused)
             .onAppear {
                 self.isFocused = true
             }
-            .onKeyPress(.upArrow) {
-                self.initialScale += 0.1
-                return .handled
-            }
             .onKeyPress(.downArrow) {
-                self.initialScale -= 0.1
+                self.graph.graph?.renderer.screenTransform.offset.y += 0.1
                 return .handled
             }
-            .onChange(of: self.initialOffset) { old, new in
-                let (x, y) : (Float32, Float32) = switch self.panGestureState {
-                case .inactive:
-                    (Float32(self.initialOffset.width), Float32(self.initialOffset.height))
-                case .active(let translation):
-                    (Float32(self.initialOffset.width + translation.width), Float32(self.initialOffset.height + translation.height))
-                }
-                
-                self.graph.graph?.renderer.screenTransform.offset = .init(x, y)
+            .onKeyPress(.upArrow) {
+                self.graph.graph?.renderer.screenTransform.offset.y -= 0.1
+                return .handled
             }
-            .onChange(of: self.initialScale) { oldValue, newValue in
-                let scale : Float32 = switch self.zoomGestureState {
-                case .inactive:
-                    Float32(self.initialScale)
-                case .active(let scale):
-                    Float32(self.initialScale * scale)
-                }
-                
-                self.graph.graph?.renderer.screenTransform.scale = .init(scale, scale)
-                
+            .onKeyPress(.leftArrow) {
+                self.graph.graph?.renderer.screenTransform.offset.x += 0.1
+                return .handled
             }
+            .onKeyPress(.rightArrow) {
+                self.graph.graph?.renderer.screenTransform.offset.x -= 0.1
+                return .handled
+            }
+            .onKeyPress("=") { // "+" (Shift + "=")
+                self.graph.graph?.renderer.screenTransform.scale *= 1.1
+                return .handled
+            }
+            .onKeyPress("-") {
+                self.graph.graph?.renderer.screenTransform.scale /= 1.1
+                return .handled
+            }
+
+
     }
 }
 

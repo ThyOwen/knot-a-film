@@ -39,7 +39,7 @@ import SharedWithMetal
         
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[0..<25])
+        let movies = Array(moviesTotal[..<128])
         
         var flatEdges: [UInt32] = []
         var offsets: [UInt32] = [] // offsets is a per-body counts array; its length equals number of bodies.

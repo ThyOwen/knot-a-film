@@ -13,6 +13,7 @@ struct Payload {
     float2 prevMidpoint[32];
     float2 prevJoint[32];
     bool shouldMask[32];
+    uint numEdges;
 };
 
 struct PointVertexOut {
@@ -39,6 +40,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 // Edge member data stores pairs of of bodies and their matching sources sorted
 // the terminations are sorted by angle going counter clockwise
 // the sources are groupped per body with duplicates (both B -> A and A -> B are stored)
+// The payload contains data for up to 32 edges (the simdgroup size)
 
 [[object]] void objectShader( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
                               constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
@@ -61,8 +63,21 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 ) {
     uint gid = bid * threads_per_threadgroup + tid;
     
-    if (gid >= numEdges)
-        return;
+    // this may solve a buggerusky where the number frames don't resolve to
+    // the screen because each thread produces a threadgroup
+    // there should be a one to one mapping between the number of threadgroups in the mesh and object shader
+    uint base = bid * threads_per_threadgroup;
+    uint remaining = (base < numEdges) ? (numEdges - base) : 0;
+    uint batchCount = min(remaining, (uint)threads_per_threadgroup);
+    
+    if (tid == 0) {
+        payload.numEdges = batchCount;
+        meshGridProperties.set_threadgroups_per_grid(uint3(1, 1, 1));
+    }
+    
+    //get rid of this the addresses pulled by the shuffles are bogulus and have no default value
+    //if (gid >= numEdges)
+        //return;
 
     uint sourceIdx = edgeSources.data[gid];
     uint terminationIdx = edgeTerminationsSorted.data[gid];
@@ -148,7 +163,6 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     payload.prevMidpoint[tid] = prevMidpoint_t;
     payload.shouldMask[tid] = false;
     
-    meshGridProperties.set_threadgroups_per_grid(uint3(1, 1, 1));
 }
 
 
@@ -160,20 +174,23 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                                ushort threads_per_threadgroup [[threads_per_threadgroup]],
                                ushort threads_per_simdgroup [[threads_per_simdgroup]]
 ) {
-    uint base = bid * threads_per_threadgroup;
-    uint remaining = numEdges > base ? numEdges - base : 0;
-    uint count = min(remaining, (uint)threads_per_threadgroup);
+    // Each object threadgroup spawns exactly 1 mesh threadgroup so bid is always 0
+    uint count = min((uint)threads_per_threadgroup, numEdges);
     
-    output.set_primitive_count(count);
+    if (tid == 0) {
+        output.set_primitive_count(count);
+    }
 
-    PointVertexOut v;
-    v.position = float4(payload.origin[tid], 0.0, 1.0);
-    v.size = 8.0;
-    output.set_vertex(tid, v);
-    PrimOut p;
-    p.color = float3(0.0, 0.5, 1.0);
-    output.set_primitive(tid, p);
-    output.set_index(tid, tid);
+    if (tid < count) {
+        PointVertexOut v;
+        v.position = float4(payload.origin[tid], 0.0, 1.0);
+        v.size = 8.0;
+        output.set_vertex(tid, v);
+        PrimOut p;
+        p.color = float3(0.0, 0.5, 1.0);
+        output.set_primitive(tid, p);
+        output.set_index(tid, tid);
+    }
 }
 
 
@@ -185,14 +202,16 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
                               ushort threads_per_threadgroup [[threads_per_threadgroup]],
                               ushort threads_per_simdgroup [[threads_per_simdgroup]]
 ) {
-    uint base = bid * threads_per_threadgroup;
-    uint remaining = numEdges > base ? numEdges - base : 0;
-    uint count = min(remaining, (uint)threads_per_threadgroup);
+    // Each object threadgroup spawns exactly 1 mesh threadgroup (bid is always 0)
+    // The payload contains data for up to 32 edges (threads_per_threadgroup)
+    uint count = min((uint)threads_per_threadgroup, numEdges);
 
     // 6 line primitives per thread
-    output.set_primitive_count(count * 6);
+    if (tid == 0) {
+        output.set_primitive_count(count * 6);
+    }
 
-    if (payload.shouldMask[tid])
+    if (tid >= count || payload.shouldMask[tid])
         return;
 
     // 7 vertices per thread

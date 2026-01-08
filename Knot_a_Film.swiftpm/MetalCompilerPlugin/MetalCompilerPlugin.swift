@@ -198,7 +198,7 @@ struct MetalCompiler: Decodable {
 
         logger?("Output: \(config.output)")
         
-        let outputURL = context.pluginWorkDirectoryURL.appendingPathComponent(config.output)
+        var outputURL = context.pluginWorkDirectoryURL.appendingPathComponent(config.output)
         arguments += ["-o", outputURL.path]
 
         var environment: [String: String] = [:]
@@ -216,15 +216,28 @@ struct MetalCompiler: Decodable {
 
         verbose?("Command: \(executable) \(arguments.joined(separator: " "))")
 
-        //fatalError("\(inputs.map { URL(string: $0)! }) \(inputs.map { Path($0) })" )
-        
+        let executableURL = URL(fileURLWithPath: executable.path)
+        let inputURLs = inputs.map { URL(fileURLWithPath: $0) }
+        outputURL = URL(fileURLWithPath: outputURL.path) // Assuming outputURL was already a URL or path
+
+        print("--- Path Verification ---")
+        print("Executable URL: \(executableURL.path)")
+        print("Output URL:     \(outputURL.path)")
+
+        print("Input count:    \(inputURLs.count)")
+
+        if let firstInputURL = inputURLs.first, let firstInputPath = inputs.first {
+            print("First Input Match: \(firstInputURL.path == firstInputPath)")
+        }
+        print("-------------------------")
+
         return .buildCommand(
             displayName: "metal",
-            executable: Path(executable.path),
+            executable: executableURL,
             arguments: arguments,
             environment: environment,
-            inputFiles: inputs.map { Path($0) },
-            outputFiles: [Path(outputURL.path)]
+            inputFiles: inputURLs,
+            outputFiles: [outputURL]
         )
 
     }

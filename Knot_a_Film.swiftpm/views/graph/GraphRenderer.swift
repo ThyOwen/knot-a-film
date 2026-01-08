@@ -58,7 +58,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         }
         
         let numBodies = UInt32(offsets.count)
-        let numEdges = UInt32(edges.count) // don't add one BAD IDEA
+        let numEdges = UInt32(edges.count)
 
         
         self.params = GraphParams.makeDefault(numBodies: numBodies, numEdges: numEdges)
@@ -106,6 +106,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let bundle = Bundle(url: shadersBundleURL)!
         let libraryURL = bundle.url(forResource: "debug", withExtension: "metallib")!
         let library = try! device.makeLibrary(URL: libraryURL)
+        //let library = try! device.makeDefaultLibrary(bundle: .main)
         
         let nodePipelineDescriptor = MTLRenderPipelineDescriptor()
         nodePipelineDescriptor.vertexFunction = try! library.makeFunction(name: "vertexNode", constantValues: functionConstants)
@@ -116,6 +117,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         bodyPipelineDescriptor.meshFunction = try! library.makeFunction(name: "meshPointShader", constantValues: functionConstants)
         bodyPipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
         bodyPipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
+        bodyPipelineDescriptor.maxTotalThreadsPerObjectThreadgroup = 32
+        bodyPipelineDescriptor.maxTotalThreadsPerMeshThreadgroup = 32
         bodyPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         
         self.nodeRenderPipeline = try! device.makeRenderPipelineState(descriptor: nodePipelineDescriptor)
@@ -129,6 +132,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         bodyLinePipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
         bodyLinePipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
         bodyLinePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        bodyLinePipelineDescriptor.maxTotalThreadsPerObjectThreadgroup = 32
+        bodyLinePipelineDescriptor.maxTotalThreadsPerMeshThreadgroup = 32
         let (bodyLinePipelineState, _) = try! device.makeRenderPipelineState(descriptor: bodyLinePipelineDescriptor, options: pipelineOption)
         self.bodyLineRenderPipeline = bodyLinePipelineState
         

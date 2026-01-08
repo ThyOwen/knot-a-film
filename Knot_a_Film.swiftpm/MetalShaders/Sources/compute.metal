@@ -75,10 +75,10 @@ kernel void computeBoundingBoxKernel(device NodeMemberData<float2>& topLeft [[bu
             expected = 0;
         }
         
-        float rangeX = topLeftX - bottomRightX;
-        float rangeY = topLeftY - bottomRightY;
-        float paddingX = max(abs(rangeX) * 0.01f, 0.1f);
-        float paddingY = max(abs(rangeY) * 0.01f, 0.1f);
+        //float rangeX = topLeftX - bottomRightX;
+        //float rangeY = topLeftY - bottomRightY;
+        //float paddingX = max(abs(rangeX) * 0.01f, 0.1f);
+        //float paddingY = max(abs(rangeY) * 0.01f, 0.1f);
         
         topLeft.data[0].x = -10.0f;
         topLeft.data[0].y = 10.0f;
@@ -549,7 +549,7 @@ inline void computeEdgesForce( const thread float2& bodyPos,
                 float angle = atan2(delta.y, delta.x);
                 float normalizedAngle = (angle + M_PI_F) / (2.0f * M_PI_F);
                 
-                edgeAnglesData.data[insertIdx] = floatToUInt(angle);
+                edgeAnglesData.data[insertIdx] = floatToUInt(normalizedAngle);
             } else {
                 edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
             }
