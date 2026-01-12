@@ -15,8 +15,8 @@ kernel void initalizeEdges( const device uint* __restrict edges [[buffer(0)]],
                             device EdgeMemberData<uint>& edgeTerminationsData [[buffer(EDGE_TERMINATIONS_IDX)]],
                             device EdgeMemberData<uint>& edgeSourcesData [[buffer(EDGE_SOURCES_IDX)]],
                               
-                            threadgroup int* __restrict__ shared [[threadgroup(0)]],
-                            threadgroup int* __restrict__ simdSums [[threadgroup(1)]],
+                            threadgroup int* __restrict shared [[threadgroup(0)]],
+                            threadgroup int* __restrict simdSums [[threadgroup(1)]],
                               
                             ushort tid [[thread_index_in_threadgroup]],
                             ushort lane [[thread_index_in_simdgroup]],

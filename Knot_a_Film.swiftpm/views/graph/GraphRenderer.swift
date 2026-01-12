@@ -5,10 +5,11 @@ struct GraphPrintParams {
     let debugNodes : Bool = false
     let debugBodies : Bool = false
     let debugEdges : Bool = false
+    let debugSorting : Bool = true
     let benchmark : Bool = false
     
     var isDebugEnabled : Bool {
-        return self.debugNodes || self.debugBodies || self.debugEdges
+        return self.debugNodes || self.debugBodies || self.debugEdges || self.debugSorting
     }
 }
 @Observable
@@ -23,6 +24,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     @ObservationIgnored private var boundingBoxPipeline : MTLComputePipelineState
     @ObservationIgnored private var constructTreePipeline : MTLComputePipelineState
     @ObservationIgnored private var computeForcePipeline : MTLComputePipelineState
+    @ObservationIgnored private var computeEdgeAnglesPipeline : MTLComputePipelineState
     @ObservationIgnored private var sortEdgeAnglesPipeline : MTLComputePipelineState
     
     @ObservationIgnored private var nodeRenderPipeline : MTLRenderPipelineState
@@ -154,6 +156,9 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         
         let constructTreeFunction = try! library.makeFunction(name: "constructQuadTreeKernel", constantValues: functionConstants)
         self.constructTreePipeline = try! device.makeComputePipelineState(function: constructTreeFunction)
+        
+        let computeEdgeAnglesFunction = try! library.makeFunction(name: "computeEdgeAngles", constantValues: functionConstants)
+        self.computeEdgeAnglesPipeline = try! device.makeComputePipelineState(function: computeEdgeAnglesFunction)
         
         let sortEdgeAnglesFunction = try! library.makeFunction(name: "sortEdgeAngles", constantValues: functionConstants)
         self.sortEdgeAnglesPipeline = try! device.makeComputePipelineState(function: sortEdgeAnglesFunction)
@@ -334,6 +339,22 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         encoder.endEncoding()
     }
     
+    private func computeEdgeAngles(commandBuffer: borrowing MTLCommandBuffer) {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        
+        encoder.setComputePipelineState(self.computeEdgeAnglesPipeline)
+        
+        encoder.setBuffer(self.bodyData.positionBuffer, offset: 0, index: Int(BODY_POSITION_IDX))
+        encoder.setBuffer(self.bodyData.offsetsBuffer, offset: 0, index: Int(BODY_EDGE_OFFSETS_IDX))
+        encoder.setBuffer(self.edgesData.edgeTerminationsBuffer, offset: 0, index: Int(EDGE_TERMINATIONS_IDX))
+        encoder.setBuffer(self.edgesData.edgeAnglesBuffer, offset: 0, index: Int(EDGE_ANGLES_IDX))
+
+        let gridSize = MTLSize(width: Int(params.numBodies), height: 1, depth: 1)
+
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadgroupSize)
+        encoder.endEncoding()
+    }
+    
     private func sortEdgeAngles(commandBuffer: borrowing MTLCommandBuffer) {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
@@ -407,6 +428,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         }
     
         self.runStage(name: "Compute Forces", on: commandBuffer) { self.computeForces(commandBuffer: $0) }
+        self.runStage(name: "Compute Edge Angles", on: commandBuffer) { self.computeEdgeAngles(commandBuffer: $0) }
         self.runStage(name: "Sort Angles", on: commandBuffer) { self.sortEdgeAngles(commandBuffer: $0) }
         
         self.runStage(name: "Render", on: commandBuffer) { self.render(with: descriptor, commandBuffer: $0) }
@@ -420,6 +442,10 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
             commandBuffer.waitUntilCompleted()
         }
                 
+        
+        if self.printParams.debugSorting {
+            self.printEdgeSorting()
+        }
         if self.printParams.debugNodes {
             self.printNodes()
         }
@@ -432,6 +458,11 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     }
     
     // MARK: - Debug
+
+    private func uintToFloat(_ u: UInt32) -> Float {
+        let mask: UInt32 = (u >> 31 != 0) ? 0x80000000 : 0xFFFFFFFF
+        return Float(bitPattern: u ^ mask)
+    }
     
     public func updateBodyPositions() {
         let positionBase = self.bodyData.positionBuffer.contents().assumingMemoryBound(to: SIMD2<Float>.self)
@@ -578,4 +609,39 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         // Print sentinel
         print("Sentinel: offsetBufferPtr[\(params.numBodies)] = \(offsetBufferPtr[Int(params.numBodies)])")
     }
+    
+    public func printEdgeSorting() {
+        let edgeAnglesBase = self.edgesData.edgeAnglesBuffer.contents().advanced(by: MemoryLayout<UInt32>.stride)
+        let edgeAnglesPtr = edgeAnglesBase.assumingMemoryBound(to: UInt32.self)
+        
+        let edgeTerminationsSortedBase = self.edgesData.edgeTerminationsSortedBuffer.contents().advanced(by: MemoryLayout<UInt32>.stride)
+        let edgeTerminationsSortedPtr = edgeTerminationsSortedBase.assumingMemoryBound(to: UInt32.self)
+        
+        let offsetsBase = self.bodyData.offsetsBuffer.contents().advanced(by: MemoryLayout<UInt32>.stride)
+        let offsetsPtr = offsetsBase.assumingMemoryBound(to: UInt32.self)
+        
+        let positionsBase = self.bodyData.positionBuffer.contents().advanced(by: MemoryLayout<UInt32>.stride)
+        let positionsPtr = positionsBase.assumingMemoryBound(to: SIMD2<Float>.self)
+        
+        print("\n=== EDGE SORTING DEBUG ===")
+        for bodyIdx in 0..<min(3, Int(self.params.numBodies)) {
+            let startIdx = Int(offsetsPtr[bodyIdx])
+            let endIdx = Int(offsetsPtr[bodyIdx + 1])
+            let bodyPos = positionsPtr[bodyIdx]
+            
+            print("Body \(bodyIdx) at (\(String(format: "%.3f", bodyPos.x)), \(String(format: "%.3f", bodyPos.y))):")
+            
+            var sortedEdges: [(idx: UInt32, angle: Float)] = []
+            for i in startIdx..<endIdx {
+                let angleUInt = edgeAnglesPtr[i]
+                let angle = uintToFloat(angleUInt)
+                let termIdx = edgeTerminationsSortedPtr[i]
+                sortedEdges.append((termIdx, angle))
+            }
+            
+            print("  Sorted edges: \(sortedEdges.map { "\($0.idx)(\(String(format: "%.3f", $0.angle)))" }.joined(separator: ", "))")
+        }
+        print("=== END EDGE SORTING DEBUG ===\n")
+    }
+    
 }

@@ -39,7 +39,7 @@ import SharedWithMetal
         
         let (moviesTotal, moviePeople) = try await databaseActor.fetchAndPrepareMovies()
         
-        let movies = Array(moviesTotal[..<128])
+        let movies = Array(moviesTotal[3..<10])
         
         var flatEdges: [UInt32] = []
         var offsets: [UInt32] = [] // offsets is a per-body counts array; its length equals number of bodies.
@@ -82,6 +82,7 @@ import SharedWithMetal
     }
     
     //MARK: - Edges
+    
     private static func findEdges(between watchedMovies : borrowing [MovieDTO]) -> [MovieEdge] {
         
         var edges : [MovieEdge] = []

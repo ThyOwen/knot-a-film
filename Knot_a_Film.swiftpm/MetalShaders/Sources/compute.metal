@@ -482,17 +482,6 @@ inline void computeDirectSumForce(device BodyMemberData<float2>& position,
     bodyAccel += force;
 }
 
-inline uint floatToUInt(float f) {
-    uint u = as_type<uint>(f);
-    uint mask = (u >> 31) ? 0xFFFFFFFF : 0x80000000;
-    return u ^ mask;
-}
-
-inline float uintToFloat(uint u) {
-    uint mask = (u >> 31) ? 0x80000000 : 0xFFFFFFFF;
-    return as_type<float>(u ^ mask);
-}
-
 inline void computeEdgesForce( const thread float2& bodyPos,
                                thread float2& bodyAccel,
                               
@@ -533,7 +522,6 @@ inline void computeEdgesForce( const thread float2& bodyPos,
         // compute forces
         for (int lane = 0; lane < threads_per_simdgroup; ++lane) {
             uint edgeIdx = base + lane;
-            uint insertIdx = edgeIdx + startIdx;
             
             if (edgeIdx >= numConns)
                 continue;
@@ -544,17 +532,7 @@ inline void computeEdgesForce( const thread float2& bodyPos,
             float distanceSquared = dot(delta, delta) + physics.epsilon;
             float distance = sqrt(distanceSquared);
             
-
-            if (edgeIdx < numConns) {
-                float angle = atan2(delta.y, delta.x);
-                float normalizedAngle = (angle + M_PI_F) / (2.0f * M_PI_F);
-                
-                edgeAnglesData.data[insertIdx] = floatToUInt(normalizedAngle);
-            } else {
-                edgeAnglesData.data[insertIdx] = 0xFFFFFFFF;
-            }
-            
-            if (distance > physics.epsilon && computeEdges) {
+            if (distance > physics.epsilon && computeEdges && edgeIdx < numConns) {
                 float2 direction = delta / distance;
                 float restLength = physics.edgeAttraction;
                 float displacement = distance - restLength;
@@ -639,6 +617,49 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
     initialIdx.data[bodyInitialIdx] = bodyInitialIdx;
 }
 
+//MARK: - Edge Angles and Sorting
+
+inline uint floatToUInt(float f) {
+    uint u = as_type<uint>(f);
+    uint mask = (u >> 31) ? 0xFFFFFFFF : 0x80000000;
+    return u ^ mask;
+}
+
+inline float uintToFloat(uint u) {
+    uint mask = (u >> 31) ? 0x80000000 : 0xFFFFFFFF;
+    return as_type<float>(u ^ mask);
+}
+
+kernel void computeEdgeAngles(constant BodyMemberData<float2>& position [[buffer(BODY_POSITION_IDX)]],
+                              constant BodyMemberData<uint>& offsets [[buffer(BODY_EDGE_OFFSETS_IDX)]],
+                              constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
+                              device EdgeMemberData<uint>& edgeAngles [[buffer(EDGE_ANGLES_IDX)]],
+                              uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= numBodies)
+        return;
+    
+    float2 bodyPos = position.data[gid];
+    uint startIdx = offsets.data[gid];
+    uint endIdx = offsets.data[gid + 1];
+    
+    for (uint i = startIdx; i < endIdx; ++i) {
+        uint otherIdx = edgeTerminations.data[i];
+        
+        if (otherIdx >= numBodies) {
+            edgeAngles.data[i] = 0xFFFFFFFF;
+            continue;
+        }
+        
+        float2 otherPos = position.data[otherIdx];
+        float2 delta = otherPos - bodyPos;
+        
+        float angle = atan2(delta.y, delta.x);
+        float normalizedAngle = (angle + M_PI_F) / (2.0f * M_PI_F);
+        edgeAngles.data[i] = floatToUInt(normalizedAngle);
+    }
+}
+
 constant int ITEMS = 32;
 
 kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedData [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
@@ -662,8 +683,10 @@ kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedD
     uint localKeys[ITEMS];
     uint localValues[ITEMS];
     
-    threadgroup uint scratchKeys[MAX_EDGES];
-    threadgroup uint scratchValues[MAX_EDGES];
+    threadgroup uint scratchKeys0[MAX_EDGES];
+    threadgroup uint scratchKeys1[MAX_EDGES];
+    threadgroup uint scratchValues0[MAX_EDGES];
+    threadgroup uint scratchValues1[MAX_EDGES];
 
     for (int i = 0; i < ITEMS; i++) {
         uint localOffset = lane_id + i * simd_size;
@@ -679,6 +702,8 @@ kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedD
     }
     
     for (int bit = 0; bit < 32; bit++) {
+        threadgroup uint* scratchKeys = (bit % 2 == 0) ? scratchKeys0 : scratchKeys1;
+        threadgroup uint* scratchValues = (bit % 2 == 0) ? scratchValues0 : scratchValues1;
         
         uint totalZeros = 0;
         for (uint i = 0; i < ITEMS; i++) {

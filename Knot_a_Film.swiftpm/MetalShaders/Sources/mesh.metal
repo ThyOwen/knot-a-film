@@ -13,6 +13,7 @@ struct Payload {
     float2 prevMidpoint[32];
     float2 prevJoint[32];
     bool shouldMask[32];
+    uint gid[32];
     uint numEdges;
 };
 
@@ -36,6 +37,30 @@ struct FragmentIn {
 
 using PointMeshType = metal::mesh<PointVertexOut, PrimOut, 256, 256, metal::topology::point>;
 using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::line>;
+
+
+float3 colorConvert(float h, float s, float v) {
+    float c = v * s;
+    float x = c * (1.0 - abs(fmod(h * 6.0, 2.0) - 1.0));
+    float m = v - c;
+    
+    float3 rgb;
+    if (h < 1.0/6.0) {
+        rgb = float3(c, x, 0.0);
+    } else if (h < 2.0/6.0) {
+        rgb = float3(x, c, 0.0);
+    } else if (h < 3.0/6.0) {
+        rgb = float3(0.0, c, x);
+    } else if (h < 4.0/6.0) {
+        rgb = float3(0.0, x, c);
+    } else if (h < 5.0/6.0) {
+        rgb = float3(x, 0.0, c);
+    } else {
+        rgb = float3(c, 0.0, x);
+    }
+    
+    return rgb + float3(m, m, m);
+}
 
 // Edge member data stores pairs of of bodies and their matching sources sorted
 // the terminations are sorted by angle going counter clockwise
@@ -98,7 +123,8 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     uint   prevSource   = simd_shuffle_up(sourceIdx, 1);
     float2 prevDelta    = simd_shuffle_up(delta, 1);
 
-    // seams are breaks in the connectivity of the graph. this could be from the first lane not having a neighbor or changes in the the edge source
+    // seams are breaks in the connectivity of the graph.
+    // this could be from the first lane not having a neighbor or changes in the the edge source
     bool isSimdSeam = (lane_id == 0);
     bool isSeam = isSimdSeam || (sourceIdx != prevSource);
 
@@ -130,7 +156,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
         prevMidpoint = pMid;
         prevJoint    = pPerp * width;
     }
-
+    
     float2 p1 = prevMidpoint + prevJoint;
     float2 p2 = midpoint - joint;
     
@@ -162,6 +188,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     payload.prevJoint[tid] = prevJoint_t;
     payload.prevMidpoint[tid] = prevMidpoint_t;
     payload.shouldMask[tid] = false;
+    payload.gid[tid] = gid;
     
 }
 
@@ -180,17 +207,21 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     if (tid == 0) {
         output.set_primitive_count(count);
     }
-
-    if (tid < count) {
-        PointVertexOut v;
-        v.position = float4(payload.origin[tid], 0.0, 1.0);
-        v.size = 8.0;
-        output.set_vertex(tid, v);
-        PrimOut p;
-        p.color = float3(0.0, 0.5, 1.0);
-        output.set_primitive(tid, p);
-        output.set_index(tid, tid);
-    }
+    
+    //if (tid < count) {
+    PointVertexOut v;
+    v.position = float4(payload.origin[tid], 0.0, 1.0);
+    v.size = 8.0;
+    output.set_vertex(tid, v);
+    
+    // Map gid to hue (0 to 1)
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
+    PrimOut p;
+    p.color = colorConvert(hue, 0.8, 1.0);
+    output.set_primitive(tid, p);
+    output.set_index(tid, tid);
+    //}
 }
 
 
@@ -211,8 +242,8 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
         output.set_primitive_count(count * 6);
     }
 
-    if (tid >= count || payload.shouldMask[tid])
-        return;
+    //if (tid >= count || payload.shouldMask[tid])
+        //return;
 
     // 7 vertices per thread
     uint vertBase = tid * 7;
@@ -245,8 +276,10 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
 
     uint primBase = tid * 6;
 
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
     PrimOut p;
-    p.color = float3(0.6, 0.8, 0.9);
+    p.color = colorConvert(hue, 0.8, 1.0);
 
     for (uint i = 0; i < 6; ++i)
      output.set_primitive(primBase + i, p);
@@ -276,8 +309,7 @@ using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 256, metal::topology::
     output.set_index((primBase + 5) * 2 + 1, v6);
 }
 
-fragment float4 fragmentBody(FragmentIn in [[stage_in]],
-                             float2 pointCoord [[point_coord]]) {
+fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
 }
 
