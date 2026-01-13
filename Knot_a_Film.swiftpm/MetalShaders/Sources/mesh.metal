@@ -15,7 +15,7 @@ struct Payload {
     bool shouldMask[32];
     uint gid[32];
     uint numEdges;
-};
+}; 
 
 struct PointVertexOut {
     float4 position [[position]];
@@ -60,6 +60,33 @@ float3 colorConvert(float h, float s, float v) {
     }
     
     return rgb + float3(m, m, m);
+}
+
+float2 cubicBezierCollapsed(float t, float2 p0, float2 p1, float2 p2) {
+    float u = 1.0 - t;
+
+    float u2 = u * u;
+    float t2 = t * t;
+
+    return
+        u2 * u * p0 +
+        3.0 * u2 * t * p1 +
+        (3.0 * u * t2 + t2 * t) * p2;
+}
+
+float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
+    float u = 1.0 - t;
+
+    float u2 = u * u;
+    float t2 = t * t;
+
+    float b0 = u2;
+    float b1 = 2.0 * w * u * t;
+    float b2 = t2;
+
+    float denom = b0 + b1 + b2;
+
+    return (b0 * p0 + b1 * p1 + b2 * p2) / denom;
 }
 
 // Edge member data stores pairs of of bodies and their matching sources sorted
@@ -113,7 +140,7 @@ float3 colorConvert(float h, float s, float v) {
     float2 delta = terminationPoint - sourcePoint;
     float2 midpoint = (terminationPoint + sourcePoint) * 0.5f;
     
-    float width = 0.05;
+    float width = 0.025;
     float len = length(delta) + 1e-6; // avoid div by zero
     float2 perpendicular = float2(-delta.y, delta.x) / len;
     float2 joint = perpendicular * width;
@@ -224,7 +251,7 @@ float3 colorConvert(float h, float s, float v) {
     //}
 }
 
-
+/*
 [[mesh]] void meshLineShader( LineMeshType output,
                               const object_data Payload& payload [[payload]],
                               ushort tid [[thread_position_in_threadgroup]],
@@ -308,10 +335,126 @@ float3 colorConvert(float h, float s, float v) {
     output.set_index((primBase + 5) * 2 + 0, v5);
     output.set_index((primBase + 5) * 2 + 1, v6);
 }
+*/
+
+[[mesh]] void meshLineShader( LineMeshType output,
+                              const object_data Payload& payload [[payload]],
+                              ushort tid [[thread_position_in_threadgroup]],
+                              uint bid [[threadgroup_position_in_grid]],
+                              ushort lane_id [[thread_index_in_simdgroup]],
+                              ushort threads_per_threadgroup [[threads_per_threadgroup]],
+                              ushort threads_per_simdgroup [[threads_per_simdgroup]]
+) {
+    // Each object threadgroup spawns exactly 1 mesh threadgroup (bid is always 0)
+    // The payload contains data for up to 32 edges (threads_per_threadgroup)
+    uint count = min((uint)threads_per_threadgroup, numEdges);
+
+    constexpr int numBezierLines = 8;
+    int numEntryExitLines = 4; // 1: origin -> midpoint, 2: midpoint -> joint, ... 3: prevJoint -> prevMidpoint, 4: prevMidpoint -> origin
+    
+    uint numLines = numBezierLines + numEntryExitLines;
+    
+    if (tid == 0) {
+        output.set_primitive_count(count * numLines);
+    }
+
+    //if (tid >= count || payload.shouldMask[tid])
+        //return;
+
+    //IDX
+    uint bezierIndicies[numBezierLines];
+    
+    uint vertBase = tid * (numLines + 1); // add one vertex to the numbder of lines for the termination per thread
+
+    uint originIdx = vertBase + 0;
+    uint midpointIdx = vertBase + 1;
+    uint jointIdx = vertBase + 2;
+    
+    for (int i = 0; i < numBezierLines; i++) {
+        bezierIndicies[i] = jointIdx + i + 1;
+    }
+    
+    uint prevJointIdx = vertBase + (numLines - 2);
+    uint prevMidpointIdx = vertBase + (numLines - 1);
+    uint originTerminationIdx = vertBase + (numLines);
+    
+    //VERTEX
+    VertexOut originVertex, midpointVertex, jointVertex, prevJointVertex, prevMidpointVertex, originTerminationVertex;
+    VertexOut bezierVertices[numBezierLines];
+    
+    float2 joint = payload.joint[tid];
+    float2 intersection = payload.intersection[tid];
+    float2 prevJoint = payload.prevJoint[tid];
+
+    originVertex.position = float4(payload.origin[tid], 0.0, 1.0);
+    midpointVertex.position = float4(payload.midpoint[tid], 0.0, 1.0);
+    jointVertex.position = float4(payload.joint[tid], 0.0, 1.0);
+    
+    for (int i = 0; i < numBezierLines; i++) {
+        float t = (float)(i + 1) / (float)(numBezierLines + 1);
+        //float2 curvePoint = cubicBezierCollapsed(t, joint, intersection, prevJoint);
+        float2 curvePoint = conicBezier(t, joint, intersection, prevJoint, 3);
+        bezierVertices[i].position = float4(curvePoint, 0.0, 1.0);
+    }
+    
+    prevJointVertex.position = float4(payload.prevJoint[tid], 0.0, 1.0);
+    prevMidpointVertex.position = float4(payload.prevMidpoint[tid], 0.0, 1.0);
+    originTerminationVertex.position = float4(payload.origin[tid], 0.0, 1.0);
+
+    output.set_vertex(originIdx, originVertex);
+    output.set_vertex(midpointIdx, midpointVertex);
+    output.set_vertex(jointIdx, jointVertex);
+    
+    for (int i = 0; i < numBezierLines; i++) {
+        output.set_vertex(bezierIndicies[i], bezierVertices[i]);
+    }
+    
+    output.set_vertex(prevJointIdx, prevJointVertex);
+    output.set_vertex(prevMidpointIdx, prevMidpointVertex);
+    output.set_vertex(originTerminationIdx, originTerminationVertex);
+
+    uint primBase = tid * numLines;
+
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
+    PrimOut p;
+    p.color = colorConvert(hue, 0.8, 1.0);
+
+    for (uint i = 0; i < numLines; ++i) {
+        output.set_primitive(primBase + i, p);
+    }
+
+    // 0: origin -> midpoint
+    output.set_index((primBase + 0) * 2 + 0, originIdx);
+    output.set_index((primBase + 0) * 2 + 1, midpointIdx);
+
+    // 1: midpoint -> joint
+    output.set_index((primBase + 1) * 2 + 0, midpointIdx);
+    output.set_index((primBase + 1) * 2 + 1, jointIdx);
+    
+    output.set_index((primBase + 2) * 2 + 0, jointIdx);
+    output.set_index((primBase + 2) * 2 + 1, bezierIndicies[0]);
+
+    for (int i = 0; i < (numBezierLines - 1); ++i) {
+        output.set_index(((primBase + i + 3) * 2) + 0, bezierIndicies[i]);
+        output.set_index(((primBase + i + 3) * 2) + 1, bezierIndicies[i + 1]);
+    }
+    
+    output.set_index((primBase + numBezierLines + 2) * 2 + 0, bezierIndicies[numBezierLines - 1]);
+    output.set_index((primBase + numBezierLines + 2) * 2 + 1, prevJointIdx);
+    
+    output.set_index((primBase + numBezierLines + 3) * 2 + 0, prevJointIdx);
+    output.set_index((primBase + numBezierLines + 3) * 2 + 1, prevMidpointIdx);
+
+    output.set_index((primBase + numBezierLines + 4) * 2 + 0, prevMidpointIdx);
+    output.set_index((primBase + numBezierLines + 4) * 2 + 1, originTerminationIdx);
+}
+
 
 fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
 }
 
 #endif
+
 
