@@ -1,24 +1,25 @@
 # Knot a Film
 
-Knot a Film is a Swift-based application for exploring, visualizing, and analyzing the rotten tomatoes movie dataset. The project leverages SwiftUI for its interactive UI, CoreML for machine search and recommendations, SwiftData as and SQL frontend, and Metal for simulation and graphics. So the whole monty...
+*We love maps with lines and dots,*<br>
+*X marks places, paths, and spots.*<br>
+*But scrolling movies? No fun at all—*<br>
+*Just endless choices in one long crawl.*<br>
+*What if movies had a map?*<br>
+*Pick a path, tap, tap tap!*<br>
+
+*My map special, I decree.*<br>
+*Need not worry, you will see.*<br>
+*Every mind’s a garden bright,*<br>
+*tended gently, growing right.*<br>
+*See the shape and you will find*<br>
+*a little mirror of your mind.*<br>
+
+Knot a Film is an application for visualizing the rotten tomatoes movie dataset more like a map. The project is migrating from traditional SwiftUI to a metal graphics pipeline
 
 <p align="center">
     <img src="assets/test_images/test_screenshot.png" alt="Movie Web" width="35%" style="display:inline-block; margin-right:10px; border-radius:12px; box-shadow:0 2px 8px #ccc;" />
-    <img src="assets/test_images/12-4.png" alt="Movie Web" width="35%" style="display:inline-block; margin-right:10px; border-radius:12px; box-shadow:0 2px 8px #ccc;" />
+    <img src="assets/test_images/1-14.png" alt="Movie Web" width="45%" style="display:inline-block; margin-right:10px; border-radius:12px; box-shadow:0 2px 8px #ccc;" />
 </p>
-
-## Project Structure
-
-**External Resources:**
-- `assets/` – External images and icons
-- `dataset/` – Movie datasets (CSV, Excel, etc.)
-- `python/` – Python scripts for data preprocessing
-- `ml/` – CoreML embedding creation for recommendation and search
-
-**App Source Code (`Knot a Film.swiftpm/`):**
-- `backend/` – CSV parsing, search features, and n body simulation
-- `Resources/` – ML models, the rotten tomatoes dataset, fonts, movie poster logos, shaders
-- `views/` – SwiftUI views (ContentView, NodeGraphView, PosterView, etc.)
 
 ## Getting Started
 
@@ -43,11 +44,5 @@ Knot a Film is a Swift-based application for exploring, visualizing, and analyzi
 
 4. **First Launch:**
     - On first launch, the app may parse the dataset and initialize the database, or load the default.store.
-
-## Data Processing
-
-- **Python Scripts:**  
-  The `python/` directory contains scripts for extracting image colors, and downloading movie posters.
-
 
 *Created by Owen O'Malley, 2025.*
