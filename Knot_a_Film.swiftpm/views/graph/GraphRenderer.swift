@@ -45,6 +45,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
     @ObservationIgnored private let printParams : GraphPrintParams
     
     @ObservationIgnored var bodiesInitialized : Bool = false
+    @ObservationIgnored var useCurves : Bool = true
 
     var prevIndicies : [UInt32] = []
     var bodyPositions : [(index: Int, position: CGPoint)] = []
@@ -130,7 +131,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.bodyRenderPipeline = bodyRenderPipeline
         
         let bodyLinePipelineDescriptor = MTLMeshRenderPipelineDescriptor()
-        bodyLinePipelineDescriptor.meshFunction = try! library.makeFunction(name: "meshLineShader", constantValues: functionConstants)
+        let lineFunctionName = self.useCurves ? "meshCurveLineShader" : "meshLineShader"
+        bodyLinePipelineDescriptor.meshFunction = try! library.makeFunction(name: lineFunctionName, constantValues: functionConstants)
         bodyLinePipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
         bodyLinePipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
         bodyLinePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm

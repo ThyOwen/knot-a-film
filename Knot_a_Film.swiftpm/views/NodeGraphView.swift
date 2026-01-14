@@ -38,6 +38,17 @@ struct NodeGraphView: View {
     @GestureState private var zoomGestureState : ZoomGestureState = .inactive
     
     @FocusState private var isFocused: Bool
+    
+    var gesture : some Gesture {
+        MagnifyGesture()
+            .updating(self.$zoomGestureState) { gesture, state, transaction in
+
+                state = .active(scale: gesture.magnification)
+            }
+            .onEnded { gesture in
+                self.initialScale *= gesture.magnification
+            }
+    }
 
     var overlay: some View {
         Canvas { context, size in
@@ -99,7 +110,18 @@ struct NodeGraphView: View {
                 self.graph.graph?.renderer.screenTransform.scale /= 1.1
                 return .handled
             }
+            .gesture(self.gesture)
+            .onChange(of: self.initialScale) { oldValue, newValue in
+                let scale : Float32 = switch self.zoomGestureState {
+                case .inactive:
+                    Float32(self.initialScale)
+                case .active(let scale):
+                    Float32(self.initialScale * scale)
+                }
+                
+                self.graph.graph?.renderer.screenTransform.scale = .init(scale, scale)
 
+            }
 
     }
 }

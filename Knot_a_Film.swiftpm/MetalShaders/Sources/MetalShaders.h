@@ -10,6 +10,8 @@
 #define MAX_BODIES 1024
 #define MAX_NODES 349525
 
+#define SIMDGROUP_SIZE 32
+
 // MARK: Function Constant Indices
 
 #define FC_NUM_BODIES           0
