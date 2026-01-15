@@ -401,8 +401,8 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let gridSize = MTLSize(width: (Int(params.numEdges) + threadgroupSize.width - 1) / threadgroupSize.width, height: 1, depth: 1)
         renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
         
-        //renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
-        //renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
+        renderEncoder.setRenderPipelineState(self.bodyRenderPipeline)
+        renderEncoder.drawMeshThreadgroups(gridSize, threadsPerObjectThreadgroup: threadgroupSize, threadsPerMeshThreadgroup: threadgroupSize)
         
         renderEncoder.endEncoding()
     }

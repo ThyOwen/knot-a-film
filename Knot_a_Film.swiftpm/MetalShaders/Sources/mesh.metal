@@ -7,11 +7,17 @@ using namespace metal;
 
 struct Payload {
     float2 origin[32];
-    float2 midpoint[32];
-    float2 joint[32];
-    float2 intersection[32];
+    
+    float2 prevIntersection[32];
+    float2 nextIntersection[32];
+    
     float2 prevMidpoint[32];
+    float2 midpoint[32];
+    float2 nextMidpoint[32];
+    
     float2 prevJoint[32];
+    float2 joint[32];
+    float2 nextJoint[32];
     uint gid[32];
     uint numEdges;
     uint lod;
@@ -148,16 +154,26 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float2 joint = perpendicular * width;
 
     float2 prevMidpoint = simd_shuffle_up(midpoint, 1);
+    float2 nextMidpoint = simd_shuffle_down(midpoint, 1);
+    
     float2 prevJoint    = simd_shuffle_up(joint, 1);
-    uint   prevSource   = simd_shuffle_up(sourceIdx, 1);
+    float2 nextJoint    = simd_shuffle_down(joint, 1);
+    
+    uint prevSource     = simd_shuffle_up(sourceIdx, 1);
+    uint nextSource     = simd_shuffle_down(sourceIdx, 1);
+    
     float2 prevDelta    = simd_shuffle_up(delta, 1);
-
+    float2 nextDelta    = simd_shuffle_down(delta, 1);
+    
     // seams are breaks in the connectivity of the graph.
     // this could be from the first lane not having a neighbor or changes in the the edge source
-    bool isSimdSeam = (lane_id == 0);
-    bool isSeam = isSimdSeam || (sourceIdx != prevSource);
+    bool isSimdUpSeam = (lane_id == 0);
+    bool isUpSeam = isSimdUpSeam || (sourceIdx != prevSource);
+    
+    bool isSimdDownSeam = (lane_id == threads_per_simdgroup - 1);
+    bool isDownSeam = isSimdDownSeam || (sourceIdx != nextSource);
 
-    if (isSeam) {
+    if (isUpSeam) {
         // to close the loop, the "previous" edge is the last edge of this body.
         
         uint startIdx = bodyEdgeOffsets.data[sourceIdx];
@@ -186,38 +202,99 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         prevJoint    = pPerp * width;
     }
     
-    float2 p1 = prevMidpoint + prevJoint;
-    float2 p2 = midpoint - joint;
-    
-    float2 d1 = prevDelta;
-    float2 d2 = delta;
-    
-    float2 p1p2 = p2 - p1;
-    float crossProduct = d1.x * d2.y - d1.y * d2.x;
-
-    float2 intersection;
-    if (abs(crossProduct) < 1e-5) {
-        intersection = (p1 + p2) * 0.5f;
-    } else {
-        float t = (p1p2.x * d2.y - p1p2.y * d2.x) / crossProduct;
-        intersection = p1 + t * d1;
+    if (isDownSeam) {
+        // to close the loop, the "next" edge wraps to the first edge of this body.
+        
+        uint startIdx = bodyEdgeOffsets.data[sourceIdx];
+        uint endIdx   = bodyEdgeOffsets.data[sourceIdx + 1];
+        
+        bool isBodyEnd = (gid == endIdx - 1);
+        
+        uint nextGid;
+        if (isBodyEnd) {
+            nextGid = startIdx; // Wrap to start
+        } else {
+            nextGid = gid + 1;  // Just next edge (SIMD boundary case)
+        }
+        
+        uint nextTermIdx = edgeTerminationsSorted.data[nextGid];
+        float2 nextTermPos = bodyPositions.data[nextTermIdx];
+        
+        // Recompute 'next' geometry manually
+        float2 nDelta = nextTermPos - sourcePoint; // source is same
+        float2 nMid = (nextTermPos + sourcePoint) * 0.5f;
+        float nLen = length(nDelta) + 1e-6;
+        float2 nPerp = float2(-nDelta.y, nDelta.x) / nLen;
+        
+        nextDelta    = nDelta;
+        nextMidpoint = nMid;
+        nextJoint    = nPerp * width;
     }
+    
+    float2 prevP1 = prevMidpoint + prevJoint;
+    float2 prevP2 = midpoint - joint;
+    
+    float2 prevD1 = prevDelta;
+    float2 prevD2 = delta;
+    
+    float2 prevP1P2 = prevP2 - prevP1;
+    float prevCrossProduct = prevD1.x * prevD2.y - prevD1.y * prevD2.x;
+
+    float2 prevIntersection;
+    if (abs(prevCrossProduct) < 1e-5) {
+        prevIntersection = (prevP1 + prevP2) * 0.5f;
+    } else {
+        float t = (prevP1P2.x * prevD2.y - prevP1P2.y * prevD2.x) / prevCrossProduct;
+        prevIntersection = prevP1 + t * prevD1;
+    }
+    
+    float2 nextP1 = midpoint + joint;
+    float2 nextP2 = nextMidpoint - nextJoint;
+    
+    float2 nextD1 = delta;
+    float2 nextD2 = nextDelta;
+    
+    float2 nextP1P2 = nextP2 - nextP1;
+    float nextCrossProduct = nextD1.x * nextD2.y - nextD1.y * nextD2.x;
+
+    float2 nextIntersection;
+    if (abs(nextCrossProduct) < 1e-5) {
+        nextIntersection = (nextP1 + nextP2) * 0.5f;
+    } else {
+        float t = (nextP1P2.x * nextD2.y - nextP1P2.y * nextD2.x) / nextCrossProduct;
+        nextIntersection = nextP1 + t * nextD1;
+    }
+    
     //screenspace
     float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
-    float2 midpoint_t = (midpoint * transform.scale) + transform.offset;
-    float2 joint_t = (p2 * transform.scale) + transform.offset;
-    float2 intersection_t = (intersection * transform.scale) + transform.offset;
-    float2 prevJoint_t = (p1 * transform.scale) + transform.offset;
+
+    float2 prevIntersection_t = (prevIntersection * transform.scale) + transform.offset;
+    float2 nextIntersection_t = (nextIntersection * transform.scale) + transform.offset;
+    
+    float2 prevJoint_t = (prevP1 * transform.scale) + transform.offset;  // prevMidpoint + prevJoint
+    float2 joint_t = (prevP2 * transform.scale) + transform.offset;      // midpoint - joint
+    float2 nextJoint_t = (nextP2 * transform.scale) + transform.offset;  // nextMidpoint - nextJoint
+    
     float2 prevMidpoint_t = (prevMidpoint * transform.scale) + transform.offset;
+    float2 midpoint_t = (midpoint * transform.scale) + transform.offset;
+    float2 nextMidpoint_t = (nextMidpoint * transform.scale) + transform.offset;
+
     
     payload.origin[tid] = origin_t;
     payload.midpoint[tid] = midpoint_t;
-    payload.joint[tid] = joint_t;
-    payload.intersection[tid] = intersection_t;
-    payload.prevJoint[tid] = prevJoint_t;
-    payload.prevMidpoint[tid] = prevMidpoint_t;
     payload.gid[tid] = gid;
     
+    payload.prevIntersection[tid] = prevIntersection_t;
+    payload.nextIntersection[tid] = nextIntersection_t;
+
+    payload.prevJoint[tid] = prevJoint_t;
+    payload.joint[tid] = joint_t;
+    payload.nextJoint[tid] = nextJoint_t;
+    
+    payload.prevMidpoint[tid] = prevMidpoint_t;
+    payload.nextMidpoint[tid] = nextMidpoint_t;
+
+
     // Dispatch logic
     // Number of intermediate sample points on the bezier curve (results in numCurveLines + 1 line segments for the curve)
     // Max value depends on mesh limits: must satisfy threads_per_threadgroup * (numCurveLines + 2) <= 256
@@ -250,7 +327,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     
     //if (tid < count) {
     PointVertexOut v;
-    v.position = float4(payload.origin[tid], 0.0, 1.0);
+    v.position = float4(payload.nextIntersection[tid], 0.0, 1.0);
     v.size = 8.0;
     output.set_vertex(tid, v);
     
@@ -301,7 +378,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     a.position = float4(payload.origin[tid],       0.0, 1.0);
     b.position = float4(payload.midpoint[tid],     0.0, 1.0);
     c.position = float4(payload.joint[tid],        0.0, 1.0);
-    d.position = float4(payload.intersection[tid], 0.0, 1.0);
+    d.position = float4(payload.prevIntersection[tid], 0.0, 1.0);
     e.position = float4(payload.prevJoint[tid],    0.0, 1.0);
     f.position = float4(payload.prevMidpoint[tid], 0.0, 1.0);
     g.position = float4(payload.origin[tid],       0.0, 1.0);
@@ -411,7 +488,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         
         float2 origin = payload.origin[tid];
         float2 joint = payload.joint[tid];
-        float2 intersection = payload.intersection[tid];
+        float2 intersection = payload.prevIntersection[tid];
         float2 prevJoint = payload.prevJoint[tid];
         
         originVertex.position = float4(origin, 0.0, 1.0);
@@ -501,7 +578,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         uint vertBase = tid * (numLines + 1);
         
         float2 joint = payload.joint[tid];
-        float2 intersection = payload.intersection[tid];
+        float2 intersection = payload.prevIntersection[tid];
         float2 prevJoint = payload.prevJoint[tid];
         
         // Each non-base renders 7 new points (plus 1 bridge = 8 vertices total)
@@ -535,7 +612,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
             output.set_primitive(primBase + i, p);
         }
         
-        // Draw 7 lines: bridge → p0 → p1 → ... → p6
+        // Draw 7 lines: bridge -> p0 -> p1 -> ... -> p6
         for (int i = 0; i < newPointsPerNonBase; i++) {
             output.set_index((primBase + i) * 2 + 0, bezierIndices[i]);
             output.set_index((primBase + i) * 2 + 1, bezierIndices[i + 1]);
