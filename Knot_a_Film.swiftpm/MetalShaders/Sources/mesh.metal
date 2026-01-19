@@ -413,7 +413,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     // Number of intermediate sample points on the bezier curve (results in numCurveLines + 1 line segments for the curve)
     // Max value depends on mesh limits: must satisfy threads_per_threadgroup * (numCurveLines + 2) <= 256
     // With 32 threads: max numCurveLines = floor(256/32) - 6 = 8
-    constexpr int lod = 2; // 1 is the base case
+    constexpr int lod = 3; // 1 is the base case
      
     if (tid == 0) {
         payload.numEdges = batchCount;
@@ -746,49 +746,75 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     
     uint count = payload.numEdges;
     
-    constexpr int numPointsPerThread = 256 / SIMDGROUP_SIZE;
-    int numLines = numPointsPerThread - 1;
+    constexpr int numVerticesPerThread = (256 / SIMDGROUP_SIZE);  // 4 left + 4 right
+    constexpr int numLinesPerThread = numVerticesPerThread - 2;     // 3 left + 3 right
+    constexpr int numPointsPerSide = numVerticesPerThread / 2;
     
     if (tid == 0) {
-        output.set_primitive_count(count * numLines);
+        output.set_primitive_count(count * numLinesPerThread);
     }
     
-    uint primBase = tid * numLines;
-    uint vertBase = tid * (numLines + 1);
+    uint primBase = tid * numLinesPerThread;
+    uint vertBase = tid * numVerticesPerThread;
     
     float hue = float(payload.gid[tid]) / float(numEdges);
     
     PrimOut p;
     p.color = colorConvert(hue, 0.8, 1.0);
     
-    uint bezierIndices[numPointsPerThread];
-    VertexOut bezierVertices[numPointsPerThread];
+    uint leftBezierIndices[numPointsPerSide];
+    uint rightBezierIndices[numPointsPerSide];
     
-    float2 joint = payload.leftJoint[tid];
-    float2 intersection = payload.prevIntersection[tid];
+    VertexOut leftBezierVertices[numPointsPerSide];
+    VertexOut rightBezierVertices[numPointsPerSide];
+    
+    float2 leftJoint = payload.leftJoint[tid];
+    float2 rightJoint = payload.rightJoint[tid];
+    
+    float2 prevIntersection = payload.prevIntersection[tid];
+    float2 nextIntersection = payload.nextIntersection[tid];
+    
     float2 prevJoint = payload.prevJoint[tid];
+    float2 nextJoint = payload.nextJoint[tid];
     
-    int pointsPerSegment = numPointsPerThread - 1;
+    int pointsPerSegment = numPointsPerSide - 1;
     int totalPoints = 1 + (int)payload.lod * pointsPerSegment;
     int startIdx = (int)bid * pointsPerSegment;
     
-    for (int i = 0; i < numPointsPerThread; i++) {
+    // left side vertices (indices 0-3)
+    for (int i = 0; i < numPointsPerSide; i++) {
         int globalIdx = startIdx + i;
         float t = (float)globalIdx / (float)(totalPoints - 1);
-        float2 curvePoint = conicBezier(t, joint, intersection, prevJoint, 3.0f);
-        
-        bezierIndices[i] = vertBase + i;
-        bezierVertices[i].position = float4(curvePoint, 0.0, 1.0);
-        output.set_vertex(bezierIndices[i], bezierVertices[i]);
+        float2 leftCurvePoint = conicBezier(t, leftJoint, prevIntersection, prevJoint, 3.0f);
+        leftBezierIndices[i] = vertBase + i;
+        leftBezierVertices[i].position = float4(leftCurvePoint, 0.0, 1.0);
+        output.set_vertex(leftBezierIndices[i], leftBezierVertices[i]);
     }
     
-    for (int i = 0; i < numLines; ++i) {
+    //right side vertices (indices 4-7)
+    for (int i = 0; i < numPointsPerSide; i++) {
+        int globalIdx = startIdx + i;
+        float t = (float)globalIdx / (float)(totalPoints - 1);
+        float2 rightCurvePoint = conicBezier(t, rightJoint, nextIntersection, nextJoint, 3.0f);
+        rightBezierIndices[i] = vertBase + numPointsPerSide + i;
+        rightBezierVertices[i].position = float4(rightCurvePoint, 0.0, 1.0);
+        output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
+    }
+    
+    // left side lines: 0 -> 1, 1 -> 2, 2 -> 3
+    for (int i = 0; i < numPointsPerSide - 1; ++i) {
         output.set_primitive(primBase + i, p);
-        output.set_index((primBase + i) * 2 + 0, bezierIndices[i]);
-        output.set_index((primBase + i) * 2 + 1, bezierIndices[i + 1]);
+        output.set_index((primBase + i) * 2 + 0, leftBezierIndices[i]);
+        output.set_index((primBase + i) * 2 + 1, leftBezierIndices[i + 1]);
+    }
+    
+    // right side lines: 4 -> 5, 5 -> 6, 6 -> 7
+    for (int i = 0; i < numPointsPerSide - 1; ++i) {
+        output.set_primitive(primBase + (numPointsPerSide - 1) + i, p);
+        output.set_index((primBase + (numPointsPerSide - 1) + i) * 2 + 0, rightBezierIndices[i]);
+        output.set_index((primBase + (numPointsPerSide - 1) + i) * 2 + 1, rightBezierIndices[i + 1]);
     }
 }
-
 fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
 }
