@@ -16,7 +16,8 @@ struct Payload {
     float2 nextMidpoint[32];
     
     float2 prevJoint[32];
-    float2 joint[32];
+    float2 leftJoint[32];
+    float2 rightJoint[32];
     float2 nextJoint[32];
     uint gid[32];
     uint numEdges;
@@ -272,7 +273,8 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float2 nextIntersection_t = (nextIntersection * transform.scale) + transform.offset;
     
     float2 prevJoint_t = (prevP1 * transform.scale) + transform.offset;  // prevMidpoint + prevJoint
-    float2 joint_t = (prevP2 * transform.scale) + transform.offset;      // midpoint - joint
+    float2 leftJoint_t = (prevP2 * transform.scale) + transform.offset;      // midpoint - joint
+    float2 rightJoint_t = (nextP1 * transform.scale) + transform.offset;      // midpoint + joint
     float2 nextJoint_t = (nextP2 * transform.scale) + transform.offset;  // nextMidpoint - nextJoint
     
     float2 prevMidpoint_t = (prevMidpoint * transform.scale) + transform.offset;
@@ -288,7 +290,8 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     payload.nextIntersection[tid] = nextIntersection_t;
 
     payload.prevJoint[tid] = prevJoint_t;
-    payload.joint[tid] = joint_t;
+    payload.leftJoint[tid] = leftJoint_t;
+    payload.rightJoint[tid] = rightJoint_t;
     payload.nextJoint[tid] = nextJoint_t;
     
     payload.prevMidpoint[tid] = prevMidpoint_t;
@@ -377,7 +380,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
 
     a.position = float4(payload.origin[tid],       0.0, 1.0);
     b.position = float4(payload.midpoint[tid],     0.0, 1.0);
-    c.position = float4(payload.joint[tid],        0.0, 1.0);
+    c.position = float4(payload.leftJoint[tid],        0.0, 1.0);
     d.position = float4(payload.prevIntersection[tid], 0.0, 1.0);
     e.position = float4(payload.prevJoint[tid],    0.0, 1.0);
     f.position = float4(payload.prevMidpoint[tid], 0.0, 1.0);
@@ -426,7 +429,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     output.set_index((primBase + 5) * 2 + 1, v6);
 }
 
-[[mesh]] void meshCurveLineShader( LineMeshType output,
+[[mesh]] void meshCurveLineShaderOld( LineMeshType output,
                                    const object_data Payload& payload [[payload]],
                                    ushort tid [[thread_index_in_threadgroup]],
                                    uint bid [[threadgroup_position_in_grid]],
@@ -487,7 +490,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         VertexOut bezierVertices[3];
         
         float2 origin = payload.origin[tid];
-        float2 joint = payload.joint[tid];
+        float2 joint = payload.leftJoint[tid];
         float2 intersection = payload.prevIntersection[tid];
         float2 prevJoint = payload.prevJoint[tid];
         
@@ -577,7 +580,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         
         uint vertBase = tid * (numLines + 1);
         
-        float2 joint = payload.joint[tid];
+        float2 joint = payload.leftJoint[tid];
         float2 intersection = payload.prevIntersection[tid];
         float2 prevJoint = payload.prevJoint[tid];
         
@@ -620,6 +623,62 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     }
 }
 
+
+[[mesh]] void meshCurveLineShader( LineMeshType output,
+                                   const object_data Payload& payload [[payload]],
+                                   ushort tid [[thread_index_in_threadgroup]],
+                                   uint bid [[threadgroup_position_in_grid]],
+                                   ushort lane_id [[thread_index_in_simdgroup]],
+                                   ushort threads_per_threadgroup [[threads_per_threadgroup]],
+                                   ushort threads_per_simdgroup [[threads_per_simdgroup]]
+) {
+    // The payload contains data for up to 32 edges (threads_per_threadgroup)
+    // payload.numEdges is the actual count for this object threadgroup's batch
+    
+    uint count = payload.numEdges;
+    
+    constexpr int numPointsPerThread = 256 / SIMDGROUP_SIZE;
+    int numLines = numPointsPerThread - 1;
+    
+    if (tid == 0) {
+        output.set_primitive_count(count * numLines);
+    }
+    
+    uint primBase = tid * numLines;
+    uint vertBase = tid * (numLines + 1);
+    
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
+    PrimOut p;
+    p.color = colorConvert(hue, 0.8, 1.0);
+    
+    uint bezierIndices[numPointsPerThread];
+    VertexOut bezierVertices[numPointsPerThread];
+    
+    float2 joint = payload.leftJoint[tid];
+    float2 intersection = payload.prevIntersection[tid];
+    float2 prevJoint = payload.prevJoint[tid];
+    
+    int pointsPerSegment = numPointsPerThread - 1;
+    int totalPoints = 1 + (int)payload.lod * pointsPerSegment;
+    int startIdx = (int)bid * pointsPerSegment;
+    
+    for (int i = 0; i < numPointsPerThread; i++) {
+        int globalIdx = startIdx + i;
+        float t = (float)globalIdx / (float)(totalPoints - 1);
+        float2 curvePoint = conicBezier(t, joint, intersection, prevJoint, 3.0f);
+        
+        bezierIndices[i] = vertBase + i;
+        bezierVertices[i].position = float4(curvePoint, 0.0, 1.0);
+        output.set_vertex(bezierIndices[i], bezierVertices[i]);
+    }
+    
+    for (int i = 0; i < numLines; ++i) {
+        output.set_primitive(primBase + i, p);
+        output.set_index((primBase + i) * 2 + 0, bezierIndices[i]);
+        output.set_index((primBase + i) * 2 + 1, bezierIndices[i + 1]);
+    }
+}
 
 fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
