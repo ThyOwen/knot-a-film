@@ -45,12 +45,15 @@ struct FragmentIn {
 using PointMeshType = metal::mesh<PointVertexOut, PrimOut, 256, 256, metal::topology::point>;
 // threads_per_threadgroup is the simdgroup_size
 // LineMeshType needs to accommodate: threads_per_threadgroup * (numCurveLines + 6) vertices/primitives
+// each thread will spit out 8 vertices
+// vertices, prims
 // the limits of the are 256 for vertices and 512 for prims
-// with 32 threads and numCurveLines=2: 32 * (6 + 2) = 256 vertices, 32 * 7 = 224 primitives this is the minimum
-// for every lod increase after the minimum only the numCurveLines increases and the "base" (origin, midpoint...) so the next level becomes
-// with 32 threads and numCurveLines=8: 32 * 8 = 256 vertices, 32 * 7 = 224 primitives for the next threadgroup
+// with 32 threads and numCurveLines=8: 32 * 8 = 256 vertices, 32 * 6 = 192 primitive
 
-using LineMeshType = metal::mesh<VertexOut, PrimOut, 224, 256, metal::topology::line>;
+
+using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 192, metal::topology::line>;
+using TriangleMeshType = metal::mesh<VertexOut, PrimOut, 256, 192, metal::topology::triangle>;
+
 
 
 float3 colorConvert(float h, float s, float v) {
@@ -108,17 +111,17 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
 // the sources are groupped per body with duplicates (both B -> A and A -> B are stored)
 // The payload contains data for up to 32 edges (the simdgroup size)
 
-[[object]] void objectShaderLessBranchy( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
-                              constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
-                              constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
-                              constant BodyMemberData<float2>& bodyPositions [[buffer(BODY_POSITION_IDX)]],
-                              constant BodyMemberData<uint>& bodyEdgeOffsets [[buffer(BODY_EDGE_OFFSETS_IDX)]],
-                              constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
-                              object_data Payload& payload [[payload]],
-                              mesh_grid_properties meshGridProperties,
-                              ushort tid [[thread_index_in_threadgroup]],
-                              uint bid [[threadgroup_position_in_grid]],
-                              ushort threads_per_threadgroup [[threads_per_threadgroup]]
+[[object]] void objectShaderSimple( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
+                                    constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
+                                    constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
+                                    constant BodyMemberData<float2>& bodyPositions [[buffer(BODY_POSITION_IDX)]],
+                                    constant BodyMemberData<uint>& bodyEdgeOffsets [[buffer(BODY_EDGE_OFFSETS_IDX)]],
+                                    constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
+                                    object_data Payload& payload [[payload]],
+                                    mesh_grid_properties meshGridProperties,
+                                    ushort tid [[thread_index_in_threadgroup]],
+                                    uint bid [[threadgroup_position_in_grid]],
+                                    ushort threads_per_threadgroup [[threads_per_threadgroup]]
 ) {
     uint gid = bid * threads_per_threadgroup + tid;
     
@@ -266,11 +269,11 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     //get rid of this the addresses pulled by the shuffles are bogulus and have no default value
     if (gid >= numEdges) {
         if (tid == 0) {
-            payload.numEdges = batchCount;
-            payload.lod = 1;
-            meshGridProperties.set_threadgroups_per_grid(uint3(0, 1, 1));
+            //payload.numEdges = batchCount;
+            //payload.lod = 1;
+            //meshGridProperties.set_threadgroups_per_grid(uint3(0, 1, 1));
         }
-        return;
+        //return;
     }
 
     uint sourceIdx = edgeSources.data[gid];
@@ -413,7 +416,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     // Number of intermediate sample points on the bezier curve (results in numCurveLines + 1 line segments for the curve)
     // Max value depends on mesh limits: must satisfy threads_per_threadgroup * (numCurveLines + 2) <= 256
     // With 32 threads: max numCurveLines = floor(256/32) - 6 = 8
-    constexpr int lod = 3; // 1 is the base case
+    constexpr int lod = 5; // 1 is the base case
      
     if (tid == 0) {
         payload.numEdges = batchCount;
@@ -422,6 +425,9 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     }
     
 }
+
+
+
 [[mesh]] void meshPointShader( PointMeshType output,
                                const object_data Payload& payload [[payload]],
                                ushort tid [[thread_position_in_threadgroup]],
@@ -538,201 +544,6 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     output.set_index((primBase + 5) * 2 + 1, v6);
 }
 
-[[mesh]] void meshCurveLineShaderOld( LineMeshType output,
-                                   const object_data Payload& payload [[payload]],
-                                   ushort tid [[thread_index_in_threadgroup]],
-                                   uint bid [[threadgroup_position_in_grid]],
-                                   ushort lane_id [[thread_index_in_simdgroup]],
-                                   ushort threads_per_threadgroup [[threads_per_threadgroup]],
-                                   ushort threads_per_simdgroup [[threads_per_simdgroup]]
-) {
-    // The payload contains data for up to 32 edges (threads_per_threadgroup)
-    // payload.numEdges is the actual count for this object threadgroup's batch
-    
-    uint count = payload.numEdges;
-    
-    constexpr int numPointsPerThread = 256 / SIMDGROUP_SIZE;
-    
-    // Each object threadgroup spawns 'lod' mesh threadgroups (bid 0 to lod-1)
-    // bid is local to each object's mesh grid, so bid == 0 is base case
-    bool isBaseCase = bid == 0;
-    
-    // Entry/exit lines: origin->midpoint, midpoint->joint, joint->bezier[0], bezier[last - 1]->bezier[last], bezier[last]->prevJoint, prevJoint->prevMidpoint, prevMidpoint->origin
-    // Note: joint->bezier[0] and bezier[last]->prevJoint count as part of the bezier section in indexing
-
-    int numLines = numPointsPerThread - 1; // numCurveLines + (numBaseLines - 1);
-    
-    if (tid == 0) {
-        output.set_primitive_count(count * numLines);
-    }
-    
-    uint primBase = tid * numLines;
-    
-    float hue = float(payload.gid[tid]) / float(numEdges);
-    
-    PrimOut p;
-    //p.color = colorConvert(hue, 0.8, 1.0);
-    p.color = isBaseCase ? float3(0.5, 0.5, 1.0) : colorConvert(hue, 0.8, 1.0);
-
-    if (isBaseCase) {
-        // Base case renders: origin->midpoint->joint->firstCurvePoint, bridgePoint->lastCurvePoint->prevJoint->prevMidpoint->origin
-        // there is an extra bridge index before the lastCurve point
-        uint bezierIndices[3];
-        
-        uint vertBase = tid * (numLines + 1); // add one vertex to the number of lines for the termination per thread
-        
-        uint originIdx = vertBase + 0;
-        uint midpointIdx = vertBase + 1;
-        uint jointIdx = vertBase + 2;
-        uint firstCurveIdx = vertBase + 3;
-        uint bridgeCurveIdx = vertBase + 4;  // Bridge from last non-base threadgroup
-        uint lastCurveIdx = vertBase + 5;
-        uint prevJointIdx = vertBase + 6;
-        uint prevMidpointIdx = vertBase + 7;
-        
-        bezierIndices[0] = firstCurveIdx;
-        bezierIndices[1] = bridgeCurveIdx;
-        bezierIndices[2] = lastCurveIdx;
-        
-        //VERTEX
-        VertexOut originVertex, midpointVertex, jointVertex, prevJointVertex, prevMidpointVertex, originTerminationVertex;
-        VertexOut bezierVertices[3];
-        
-        float2 origin = payload.origin[tid];
-        float2 joint = payload.leftJoint[tid];
-        float2 intersection = payload.prevIntersection[tid];
-        float2 prevJoint = payload.prevJoint[tid];
-        
-        originVertex.position = float4(origin, 0.0, 1.0);
-        midpointVertex.position = float4(payload.midpoint[tid], 0.0, 1.0);
-        jointVertex.position = float4(joint, 0.0, 1.0);
-        
-        prevJointVertex.position = float4(prevJoint, 0.0, 1.0);
-        prevMidpointVertex.position = float4(payload.prevMidpoint[tid], 0.0, 1.0);
-        originTerminationVertex.position = float4(origin, 0.0, 1.0);
-        
-        output.set_vertex(originIdx, originVertex);
-        output.set_vertex(midpointIdx, midpointVertex);
-        output.set_vertex(jointIdx, jointVertex);
-        
-        output.set_vertex(prevJointIdx, prevJointVertex);
-        output.set_vertex(prevMidpointIdx, prevMidpointVertex);
-        // Use prevJoint slot for origin termination (reusing vertex slot)
-        
-        // Calculate total curve divisions across all LOD levels
-        // Each non-base-case threadgroup renders (numPointsPerThread - 1) new points (1 vertex is bridge)
-        // Base case renders first (point 0) and last (point N-1)
-        int newPointsPerNonBase = numPointsPerThread - 1; // 7
-        int totalCurvePoints = 2 + ((int)payload.lod - 1) * newPointsPerNonBase; // 2 + (lod-1)*7
-        
-        // First curve point (index 0)
-        float t0 = 1.0f / (float)(totalCurvePoints + 1);
-        float2 firstCurvePoint = conicBezier(t0, joint, intersection, prevJoint, 3.0f);
-        bezierVertices[0].position = float4(firstCurvePoint, 0.0, 1.0);
-        output.set_vertex(firstCurveIdx, bezierVertices[0]);
-        
-        // Bridge point: last point rendered by the last non-base threadgroup
-        // Last non-base (bid = lod-1) renders points up to: 1 + (lod-2)*7 + 6 = (lod-1)*7
-        // That equals totalCurvePoints - 2 (since totalCurvePoints = 2 + (lod-1)*7)
-        int lastNonBaseLastIdx = totalCurvePoints - 2;
-        float tBridge = (float)(lastNonBaseLastIdx + 1) / (float)(totalCurvePoints + 1);
-        float2 bridgeCurvePoint = conicBezier(tBridge, joint, intersection, prevJoint, 3.0f);
-        bezierVertices[1].position = float4(bridgeCurvePoint, 0.0, 1.0);
-        output.set_vertex(bridgeCurveIdx, bezierVertices[1]);
-        
-        // Last curve point (index totalCurvePoints - 1)
-        float tLast = (float)totalCurvePoints / (float)(totalCurvePoints + 1);
-        float2 lastCurvePoint = conicBezier(tLast, joint, intersection, prevJoint, 3.0f);
-        bezierVertices[2].position = float4(lastCurvePoint, 0.0, 1.0);
-        output.set_vertex(lastCurveIdx, bezierVertices[2]);
-        
-        for (int i = 0; i < numLines; ++i) {
-            output.set_primitive(primBase + i, p);
-        }
-        
-        // 0: origin -> midpoint
-        output.set_index((primBase + 0) * 2 + 0, originIdx);
-        output.set_index((primBase + 0) * 2 + 1, midpointIdx);
-        
-        // 1: midpoint -> joint
-        output.set_index((primBase + 1) * 2 + 0, midpointIdx);
-        output.set_index((primBase + 1) * 2 + 1, jointIdx);
-        
-        // 2: joint -> first_curve_point
-        output.set_index((primBase + 2) * 2 + 0, jointIdx);
-        output.set_index((primBase + 2) * 2 + 1, firstCurveIdx);
-        
-        // Gap here filled by non-base threadgroups
-        
-        // 3: bridge_point -> last_curve_point (connects last non-base output to our last point)
-        output.set_index((primBase + 3) * 2 + 0, bridgeCurveIdx);
-        output.set_index((primBase + 3) * 2 + 1, lastCurveIdx);
-        
-        // 4: last_curve_point -> previous_joint
-        output.set_index((primBase + 4) * 2 + 0, lastCurveIdx);
-        output.set_index((primBase + 4) * 2 + 1, prevJointIdx);
-        
-        // 5: previous_joint -> previous_midpoint
-        output.set_index((primBase + 5) * 2 + 0, prevJointIdx);
-        output.set_index((primBase + 5) * 2 + 1, prevMidpointIdx);
-        
-        // 6: previous_midpoint -> origin
-        output.set_index((primBase + 6) * 2 + 0, prevMidpointIdx);
-        output.set_index((primBase + 6) * 2 + 1, originIdx);
-        
-
-    } else {
-        // Non-base case: render bridge vertex + (numPointsPerThread - 1) new curve points
-        // Total: 8 vertices, 7 lines
-        uint bezierIndices[numPointsPerThread]; // 8 vertices
-        VertexOut bezierVertices[numPointsPerThread];
-        
-        uint vertBase = tid * (numLines + 1);
-        
-        float2 joint = payload.leftJoint[tid];
-        float2 intersection = payload.prevIntersection[tid];
-        float2 prevJoint = payload.prevJoint[tid];
-        
-        // Each non-base renders 7 new points (plus 1 bridge = 8 vertices total)
-        int newPointsPerNonBase = numPointsPerThread - 1; // 7
-        int totalCurvePoints = 2 + ((int)payload.lod - 1) * newPointsPerNonBase;
-        
-        // curveOffset is the first NEW point index for this threadgroup
-        // bid=1: curveOffset = 1 (renders new points 1-7)
-        // bid=2: curveOffset = 8 (renders new points 8-14)
-        int curveOffset = 1 + ((int)bid - 1) * newPointsPerNonBase;
-        
-        // Bridge vertex: previous segment's last point (curveOffset - 1)
-        int bridgeIdx = curveOffset - 1;
-        float bridgeT = (float)(bridgeIdx + 1) / (float)(totalCurvePoints + 1);
-        float2 bridgePoint = conicBezier(bridgeT, joint, intersection, prevJoint, 3.0f);
-        bezierIndices[0] = vertBase;
-        bezierVertices[0].position = float4(bridgePoint, 0.0, 1.0);
-        output.set_vertex(bezierIndices[0], bezierVertices[0]);
-        
-        // Render new curve points: curveOffset to curveOffset + newPointsPerNonBase - 1
-        for (int i = 0; i < newPointsPerNonBase; i++) {
-            int pointIdx = curveOffset + i;
-            float t = (float)(pointIdx + 1) / (float)(totalCurvePoints + 1);
-            float2 curvePoint = conicBezier(t, joint, intersection, prevJoint, 3.0f);
-            bezierIndices[i + 1] = vertBase + i + 1;
-            bezierVertices[i + 1].position = float4(curvePoint, 0.0, 1.0);
-            output.set_vertex(bezierIndices[i + 1], bezierVertices[i + 1]);
-        }
-        
-        for (int i = 0; i < numLines; ++i) {
-            output.set_primitive(primBase + i, p);
-        }
-        
-        // Draw 7 lines: bridge -> p0 -> p1 -> ... -> p6
-        for (int i = 0; i < newPointsPerNonBase; i++) {
-            output.set_index((primBase + i) * 2 + 0, bezierIndices[i]);
-            output.set_index((primBase + i) * 2 + 1, bezierIndices[i + 1]);
-        }
-    }
-}
-
-
 [[mesh]] void meshCurveLineShader( LineMeshType output,
                                    const object_data Payload& payload [[payload]],
                                    ushort tid [[thread_index_in_threadgroup]],
@@ -777,9 +588,9 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float2 prevJoint = payload.prevJoint[tid];
     float2 nextJoint = payload.nextJoint[tid];
     
-    int pointsPerSegment = numPointsPerSide - 1;
-    int totalPoints = 1 + (int)payload.lod * pointsPerSegment;
-    int startIdx = (int)bid * pointsPerSegment;
+    int numLinesPerSide = numPointsPerSide - 1;
+    int totalPoints = 1 + (int)payload.lod * numLinesPerSide;
+    int startIdx = (int)bid * numLinesPerSide;
     
     // left side vertices (indices 0-3)
     for (int i = 0; i < numPointsPerSide; i++) {
@@ -800,21 +611,107 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         rightBezierVertices[i].position = float4(rightCurvePoint, 0.0, 1.0);
         output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
     }
-    
+
     // left side lines: 0 -> 1, 1 -> 2, 2 -> 3
-    for (int i = 0; i < numPointsPerSide - 1; ++i) {
+    for (int i = 0; i < numLinesPerSide; ++i) {
         output.set_primitive(primBase + i, p);
         output.set_index((primBase + i) * 2 + 0, leftBezierIndices[i]);
         output.set_index((primBase + i) * 2 + 1, leftBezierIndices[i + 1]);
     }
     
     // right side lines: 4 -> 5, 5 -> 6, 6 -> 7
-    for (int i = 0; i < numPointsPerSide - 1; ++i) {
-        output.set_primitive(primBase + (numPointsPerSide - 1) + i, p);
-        output.set_index((primBase + (numPointsPerSide - 1) + i) * 2 + 0, rightBezierIndices[i]);
-        output.set_index((primBase + (numPointsPerSide - 1) + i) * 2 + 1, rightBezierIndices[i + 1]);
+    for (int i = 0; i < numLinesPerSide; ++i) {
+        output.set_primitive(primBase + numLinesPerSide + i, p);
+        output.set_index((primBase + numLinesPerSide + i) * 2 + 0, rightBezierIndices[i]);
+        output.set_index((primBase + numLinesPerSide + i) * 2 + 1, rightBezierIndices[i + 1]);
     }
 }
+
+[[mesh]] void meshCurveTriangleShader( TriangleMeshType output,
+                                       const object_data Payload& payload [[payload]],
+                                       ushort tid [[thread_index_in_threadgroup]],
+                                       uint bid [[threadgroup_position_in_grid]],
+                                       ushort lane_id [[thread_index_in_simdgroup]],
+                                       ushort threads_per_threadgroup [[threads_per_threadgroup]],
+                                       ushort threads_per_simdgroup [[threads_per_simdgroup]]
+) {
+    uint count = payload.numEdges;
+    
+    constexpr int numVerticesPerThread = (256 / SIMDGROUP_SIZE);  // 8 total (4 left + 4 right)
+    constexpr int numPointsPerSide = numVerticesPerThread / 2;    // 4 points per side
+    constexpr int numSegments = numPointsPerSide - 1;             // 3 segments
+    constexpr int numTrianglesPerThread = numSegments * 2;        // 2 triangles per segment = 6 total
+    
+    if (tid == 0) {
+        output.set_primitive_count(count * numTrianglesPerThread);
+    }
+    
+    uint primBase = tid * numTrianglesPerThread;
+    uint vertBase = tid * numVerticesPerThread;
+    
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
+    PrimOut p;
+    p.color = colorConvert(hue, 0.8, 1.0);
+    
+    uint leftBezierIndices[numPointsPerSide];
+    uint rightBezierIndices[numPointsPerSide];
+    
+    VertexOut leftBezierVertices[numPointsPerSide];
+    VertexOut rightBezierVertices[numPointsPerSide];
+    
+    float2 leftJoint = payload.leftJoint[tid];
+    float2 rightJoint = payload.rightJoint[tid];
+    
+    float2 prevIntersection = payload.prevIntersection[tid];
+    float2 nextIntersection = payload.nextIntersection[tid];
+    
+    float2 prevJoint = payload.prevJoint[tid];
+    float2 nextJoint = payload.nextJoint[tid];
+    
+    int totalPoints = 1 + (int)payload.lod * numSegments;
+    int startIdx = (int)bid * numSegments;
+    
+    // left side vertices (indices 0-3)
+    for (int i = 0; i < numPointsPerSide; i++) {
+        int globalIdx = startIdx + i;
+        float t = (float)globalIdx / (float)(totalPoints - 1);
+        float2 leftCurvePoint = conicBezier(t / 2, leftJoint, prevIntersection, prevJoint, 3.0f);
+        leftBezierIndices[i] = vertBase + i;
+        leftBezierVertices[i].position = float4(leftCurvePoint, 0.0, 1.0);
+        output.set_vertex(leftBezierIndices[i], leftBezierVertices[i]);
+    }
+    
+    // right side vertices (indices 4-7)
+    for (int i = 0; i < numPointsPerSide; i++) {
+        int globalIdx = startIdx + i;
+        float t = (float)globalIdx / (float)(totalPoints - 1);
+        float2 rightCurvePoint = conicBezier(t / 2, rightJoint, nextIntersection, nextJoint, 3.0f);
+        rightBezierIndices[i] = vertBase + numPointsPerSide + i;
+        rightBezierVertices[i].position = float4(rightCurvePoint, 0.0, 1.0);
+        output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
+    }
+
+    // there is a bridge between the left and right sides of the curve
+    // each segment is 2 triangles
+    for (int i = 0; i < numSegments; ++i) {
+        uint triIdx = primBase + (i * 2);
+        
+        // triangle: (left[i], left[i+1], right[i])
+        output.set_primitive(triIdx, p);
+        output.set_index(triIdx * 3 + 0, leftBezierIndices[i]);
+        output.set_index(triIdx * 3 + 1, leftBezierIndices[i + 1]);
+        output.set_index(triIdx * 3 + 2, rightBezierIndices[i]);
+        
+        // triangle: (left[i+1], right[i+1], right[i])
+        output.set_primitive(triIdx + 1, p);
+        output.set_index((triIdx + 1) * 3 + 0, leftBezierIndices[i + 1]);
+        output.set_index((triIdx + 1) * 3 + 1, rightBezierIndices[i + 1]);
+        output.set_index((triIdx + 1) * 3 + 2, rightBezierIndices[i]);
+    }
+}
+
+
 fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
     return float4(in.p.color, 1.0);
 }

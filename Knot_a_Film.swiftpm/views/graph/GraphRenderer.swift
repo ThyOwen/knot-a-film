@@ -5,7 +5,7 @@ struct GraphPrintParams {
     let debugNodes : Bool = false
     let debugBodies : Bool = false
     let debugEdges : Bool = false
-    let debugSorting : Bool = true
+    let debugSorting : Bool = false
     let benchmark : Bool = false
     
     var isDebugEnabled : Bool {
@@ -117,7 +117,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         nodePipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         
         let bodyPipelineDescriptor = MTLMeshRenderPipelineDescriptor()
-        bodyPipelineDescriptor.meshFunction = try! library.makeFunction(name: "meshPointShader", constantValues: functionConstants)
+        bodyPipelineDescriptor.meshFunction = try! library.makeFunction(name: "meshCurveLineShader", constantValues: functionConstants)
         bodyPipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
         bodyPipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
         bodyPipelineDescriptor.maxTotalThreadsPerObjectThreadgroup = 32
@@ -131,7 +131,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         self.bodyRenderPipeline = bodyRenderPipeline
         
         let bodyLinePipelineDescriptor = MTLMeshRenderPipelineDescriptor()
-        let lineFunctionName = self.useCurves ? "meshCurveLineShader" : "meshLineShader"
+        let lineFunctionName = self.useCurves ? "meshCurveTriangleShader" : "meshLineShader"
         bodyLinePipelineDescriptor.meshFunction = try! library.makeFunction(name: lineFunctionName, constantValues: functionConstants)
         bodyLinePipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
         bodyLinePipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
