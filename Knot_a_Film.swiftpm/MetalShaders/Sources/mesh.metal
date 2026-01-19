@@ -108,6 +108,133 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
 // the sources are groupped per body with duplicates (both B -> A and A -> B are stored)
 // The payload contains data for up to 32 edges (the simdgroup size)
 
+[[object]] void objectShaderLessBranchy( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
+                              constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
+                              constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
+                              constant BodyMemberData<float2>& bodyPositions [[buffer(BODY_POSITION_IDX)]],
+                              constant BodyMemberData<uint>& bodyEdgeOffsets [[buffer(BODY_EDGE_OFFSETS_IDX)]],
+                              constant ScreenTransform& transform [[buffer(SCREEN_TRANSFORM_IDX)]],
+                              object_data Payload& payload [[payload]],
+                              mesh_grid_properties meshGridProperties,
+                              ushort tid [[thread_index_in_threadgroup]],
+                              uint bid [[threadgroup_position_in_grid]],
+                              ushort threads_per_threadgroup [[threads_per_threadgroup]]
+) {
+    uint gid = bid * threads_per_threadgroup + tid;
+    
+    uint base = bid * threads_per_threadgroup;
+    uint remaining = (base < numEdges) ? (numEdges - base) : 0;
+    uint batchCount = min(remaining, (uint)threads_per_threadgroup);
+    
+    if (gid >= numEdges) {
+        if (tid == 0) {
+            payload.numEdges = batchCount;
+            payload.lod = 1;
+            meshGridProperties.set_threadgroups_per_grid(uint3(0, 1, 1));
+        }
+        return;
+    }
+
+    uint sourceIdx = edgeSources.data[gid];
+    uint terminationIdx = edgeTerminationsSorted.data[gid];
+    
+    float2 sourcePoint = bodyPositions.data[sourceIdx];
+    float2 terminationPoint = bodyPositions.data[terminationIdx];
+
+    float2 delta = terminationPoint - sourcePoint;
+    float2 midpoint = (terminationPoint + sourcePoint) * 0.5f;
+    
+    float width = 0.025;
+    float len = length(delta) + 1e-6;
+    float2 perpendicular = float2(-delta.y, delta.x) / len;
+    float2 joint = perpendicular * width;
+
+    uint startIdx = bodyEdgeOffsets.data[sourceIdx];
+    uint endIdx = bodyEdgeOffsets.data[sourceIdx + 1];
+
+    uint prevGid = (gid == startIdx) ? (endIdx - 1) : (gid - 1);
+    uint nextGid = (gid == endIdx - 1) ? startIdx : (gid + 1);
+    
+    // previous edge data
+    uint prevTermIdx = edgeTerminationsSorted.data[prevGid];
+    float2 prevTermPos = bodyPositions.data[prevTermIdx];
+    float2 prevDelta = prevTermPos - sourcePoint;
+    float2 prevMidpoint = (prevTermPos + sourcePoint) * 0.5f;
+    float prevLen = length(prevDelta) + 1e-6;
+    float2 prevPerp = float2(-prevDelta.y, prevDelta.x) / prevLen;
+    float2 prevJoint = prevPerp * width;
+    
+    // next edge data
+    uint nextTermIdx = edgeTerminationsSorted.data[nextGid];
+    float2 nextTermPos = bodyPositions.data[nextTermIdx];
+    float2 nextDelta = nextTermPos - sourcePoint;
+    float2 nextMidpoint = (nextTermPos + sourcePoint) * 0.5f;
+    float nLen = length(nextDelta) + 1e-6;
+    float2 nextPerp = float2(-nextDelta.y, nextDelta.x) / nLen;
+    float2 nextJoint = nextPerp * width;
+    
+    // previous intersection
+    float2 prevP1 = prevMidpoint + prevJoint;
+    float2 prevP2 = midpoint - joint;
+    float2 prevP1P2 = prevP2 - prevP1;
+    float prevCross = prevDelta.x * delta.y - prevDelta.y * delta.x;
+    
+    float2 prevIntersection;
+    if (abs(prevCross) < 1e-5) {
+        prevIntersection = (prevP1 + prevP2) * 0.5f;
+    } else {
+        float t = (prevP1P2.x * delta.y - prevP1P2.y * delta.x) / prevCross;
+        prevIntersection = prevP1 + t * prevDelta;
+    }
+    
+    // next intersection
+    float2 nextP1 = midpoint + joint;
+    float2 nextP2 = nextMidpoint - nextJoint;
+    float2 nextP1P2 = nextP2 - nextP1;
+    float nextCross = delta.x * nextDelta.y - delta.y * nextDelta.x;
+    
+    float2 nextIntersection;
+    if (abs(nextCross) < 1e-5) {
+        nextIntersection = (nextP1 + nextP2) * 0.5f;
+    } else {
+        float t = (nextP1P2.x * nextDelta.y - nextP1P2.y * nextDelta.x) / nextCross;
+        nextIntersection = nextP1 + t * delta;
+    }
+    
+    // screen space
+    float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
+    float2 prevIntersection_t = (prevIntersection * transform.scale) + transform.offset;
+    float2 nextIntersection_t = (nextIntersection * transform.scale) + transform.offset;
+    float2 prevJoint_t = (prevP1 * transform.scale) + transform.offset;
+    float2 leftJoint_t = (prevP2 * transform.scale) + transform.offset;
+    float2 rightJoint_t = (nextP1 * transform.scale) + transform.offset;
+    float2 nextJoint_t = (nextP2 * transform.scale) + transform.offset;
+    float2 prevMidpoint_t = (prevMidpoint * transform.scale) + transform.offset;
+    float2 midpoint_t = (midpoint * transform.scale) + transform.offset;
+    float2 nextMidpoint_t = (nextMidpoint * transform.scale) + transform.offset;
+
+    payload.origin[tid] = origin_t;
+    payload.midpoint[tid] = midpoint_t;
+    payload.gid[tid] = gid;
+    payload.prevIntersection[tid] = prevIntersection_t;
+    payload.nextIntersection[tid] = nextIntersection_t;
+    payload.prevJoint[tid] = prevJoint_t;
+    payload.leftJoint[tid] = leftJoint_t;
+    payload.rightJoint[tid] = rightJoint_t;
+    payload.nextJoint[tid] = nextJoint_t;
+    payload.prevMidpoint[tid] = prevMidpoint_t;
+    payload.nextMidpoint[tid] = nextMidpoint_t;
+
+    // Dispatch logic
+    constexpr int lod = 2;
+     
+    if (tid == 0) {
+        payload.numEdges = batchCount;
+        payload.lod = lod;
+        meshGridProperties.set_threadgroups_per_grid(uint3(lod, 1, 1));
+    }
+}
+
 [[object]] void objectShader( constant EdgeMemberData<uint>& edgeTerminationsSorted [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
                               constant EdgeMemberData<uint>& edgeSources [[buffer(EDGE_SOURCES_IDX)]],
                               constant EdgeMemberData<uint>& edgeTerminations [[buffer(EDGE_TERMINATIONS_IDX)]],
@@ -133,12 +260,18 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     // the screen because each thread produces a threadgroup
     // there should be a one to one mapping between the number of threadgroups in the mesh and object shader
     uint base = bid * threads_per_threadgroup;
-    uint remaining = (base < numEdges) ? (numEdges - base) : 0;
+    uint remaining = select(0u, numEdges - base, base < numEdges);
     uint batchCount = min(remaining, (uint)threads_per_threadgroup);
     
     //get rid of this the addresses pulled by the shuffles are bogulus and have no default value
-    //if (gid >= numEdges)
-        //return;
+    if (gid >= numEdges) {
+        if (tid == 0) {
+            payload.numEdges = batchCount;
+            payload.lod = 1;
+            meshGridProperties.set_threadgroups_per_grid(uint3(0, 1, 1));
+        }
+        return;
+    }
 
     uint sourceIdx = edgeSources.data[gid];
     uint terminationIdx = edgeTerminationsSorted.data[gid];
@@ -150,88 +283,67 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float2 midpoint = (terminationPoint + sourcePoint) * 0.5f;
     
     float width = 0.025;
-    float len = length(delta) + 1e-6; // avoid div by zero
+    float len = length(delta) + 1e-6;
     float2 perpendicular = float2(-delta.y, delta.x) / len;
     float2 joint = perpendicular * width;
 
-    float2 prevMidpoint = simd_shuffle_up(midpoint, 1);
-    float2 nextMidpoint = simd_shuffle_down(midpoint, 1);
-    
-    float2 prevJoint    = simd_shuffle_up(joint, 1);
-    float2 nextJoint    = simd_shuffle_down(joint, 1);
-    
-    uint prevSource     = simd_shuffle_up(sourceIdx, 1);
-    uint nextSource     = simd_shuffle_down(sourceIdx, 1);
-    
-    float2 prevDelta    = simd_shuffle_up(delta, 1);
-    float2 nextDelta    = simd_shuffle_down(delta, 1);
+    // Get SIMD shuffled values
+    float2 simdPrevMidpoint = simd_shuffle_up(midpoint, 1);
+    float2 simdNextMidpoint = simd_shuffle_down(midpoint, 1);
+    float2 simdPrevJoint = simd_shuffle_up(joint, 1);
+    float2 simdNextJoint = simd_shuffle_down(joint, 1);
+    uint simdPrevSource = simd_shuffle_up(sourceIdx, 1);
+    uint simdNextSource = simd_shuffle_down(sourceIdx, 1);
+    float2 simdPrevDelta = simd_shuffle_up(delta, 1);
+    float2 simdNextDelta = simd_shuffle_down(delta, 1);
     
     // seams are breaks in the connectivity of the graph.
     // this could be from the first lane not having a neighbor or changes in the the edge source
     bool isSimdUpSeam = (lane_id == 0);
-    bool isUpSeam = isSimdUpSeam || (sourceIdx != prevSource);
+    bool isUpSeam = isSimdUpSeam || (sourceIdx != simdPrevSource);
     
     bool isSimdDownSeam = (lane_id == threads_per_simdgroup - 1);
-    bool isDownSeam = isSimdDownSeam || (sourceIdx != nextSource);
+    bool isDownSeam = isSimdDownSeam || (sourceIdx != simdNextSource);
 
-    if (isUpSeam) {
-        // to close the loop, the "previous" edge is the last edge of this body.
-        
-        uint startIdx = bodyEdgeOffsets.data[sourceIdx];
-        uint endIdx   = bodyEdgeOffsets.data[sourceIdx + 1];
-        
-        bool isBodyStart = (gid == startIdx);
-        
-        uint prevGid;
-        if (isBodyStart) {
-            prevGid = endIdx - 1; // Wrap to end
-        } else {
-            prevGid = gid - 1;    // Just previous edge (SIMD boundary case)
-        }
-        
-        uint prevTermIdx = edgeTerminationsSorted.data[prevGid];
-        float2 prevTermPos = bodyPositions.data[prevTermIdx];
-        
-        // Recompute 'prev' geometry manually
-        float2 pDelta = prevTermPos - sourcePoint; // source is same
-        float2 pMid = (prevTermPos + sourcePoint) * 0.5f;
-        float pLen = length(pDelta) + 1e-6;
-        float2 pPerp = float2(-pDelta.y, pDelta.x) / pLen;
-        
-        prevDelta    = pDelta;
-        prevMidpoint = pMid;
-        prevJoint    = pPerp * width;
-    }
+    uint startIdx = bodyEdgeOffsets.data[sourceIdx];
+    uint endIdx = bodyEdgeOffsets.data[sourceIdx + 1];
     
-    if (isDownSeam) {
-        // to close the loop, the "next" edge wraps to the first edge of this body.
-        
-        uint startIdx = bodyEdgeOffsets.data[sourceIdx];
-        uint endIdx   = bodyEdgeOffsets.data[sourceIdx + 1];
-        
-        bool isBodyEnd = (gid == endIdx - 1);
-        
-        uint nextGid;
-        if (isBodyEnd) {
-            nextGid = startIdx; // Wrap to start
-        } else {
-            nextGid = gid + 1;  // Just next edge (SIMD boundary case)
-        }
-        
-        uint nextTermIdx = edgeTerminationsSorted.data[nextGid];
-        float2 nextTermPos = bodyPositions.data[nextTermIdx];
-        
-        // Recompute 'next' geometry manually
-        float2 nDelta = nextTermPos - sourcePoint; // source is same
-        float2 nMid = (nextTermPos + sourcePoint) * 0.5f;
-        float nLen = length(nDelta) + 1e-6;
-        float2 nPerp = float2(-nDelta.y, nDelta.x) / nLen;
-        
-        nextDelta    = nDelta;
-        nextMidpoint = nMid;
-        nextJoint    = nPerp * width;
-    }
+    // Compute wrapped indices to close the loop, the "previous" edge is the last edge of this body.
+    bool isBodyStart = (gid == startIdx);
+    uint prevGid = select(gid - 1, endIdx - 1, isBodyStart);
     
+    // to close the loop, the "next" edge wraps to the first edge of this body.
+    bool isBodyEnd = (gid == endIdx - 1);
+    uint nextGid = select(gid + 1, startIdx, isBodyEnd);
+    
+    uint wrappedPrevTermIdx = edgeTerminationsSorted.data[prevGid];
+    uint wrappedNextTermIdx = edgeTerminationsSorted.data[nextGid];
+    float2 wrappedPrevTermPos = bodyPositions.data[wrappedPrevTermIdx];
+    float2 wrappedNextTermPos = bodyPositions.data[wrappedNextTermIdx];
+    
+    // recompute 'prev' geometry manually
+    float2 wrappedPrevDelta = wrappedPrevTermPos - sourcePoint; // source is same
+    float2 wrappedPrevMid = (wrappedPrevTermPos + sourcePoint) * 0.5f;
+    float wrappedPrevLen = length(wrappedPrevDelta) + 1e-6;
+    float2 wrappedPrevPerp = float2(-wrappedPrevDelta.y, wrappedPrevDelta.x) / wrappedPrevLen;
+    float2 wrappedPrevJoint = wrappedPrevPerp * width;
+    
+    // recompute 'next' geometry manually
+    float2 wrappedNextDelta = wrappedNextTermPos - sourcePoint; // source is same
+    float2 wrappedNextMid = (wrappedNextTermPos + sourcePoint) * 0.5f;
+    float wrappedNextLen = length(wrappedNextDelta) + 1e-6;
+    float2 wrappedNextPerp = float2(-wrappedNextDelta.y, wrappedNextDelta.x) / wrappedNextLen;
+    float2 wrappedNextJoint = wrappedNextPerp * width;
+    
+    // select between SIMD and wrapped values based on seam detection
+    float2 prevDelta = select(simdPrevDelta, wrappedPrevDelta, isUpSeam);
+    float2 nextDelta = select(simdNextDelta, wrappedNextDelta, isDownSeam);
+    float2 prevMidpoint = select(simdPrevMidpoint, wrappedPrevMid, isUpSeam);
+    float2 nextMidpoint = select(simdNextMidpoint, wrappedNextMid, isDownSeam);
+    float2 prevJoint = select(simdPrevJoint, wrappedPrevJoint, isUpSeam);
+    float2 nextJoint = select(simdNextJoint, wrappedNextJoint, isDownSeam);
+    
+    // prev miter joint
     float2 prevP1 = prevMidpoint + prevJoint;
     float2 prevP2 = midpoint - joint;
     
@@ -242,13 +354,13 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float prevCrossProduct = prevD1.x * prevD2.y - prevD1.y * prevD2.x;
 
     float2 prevIntersection;
-    if (abs(prevCrossProduct) < 1e-5) {
-        prevIntersection = (prevP1 + prevP2) * 0.5f;
-    } else {
-        float t = (prevP1P2.x * prevD2.y - prevP1P2.y * prevD2.x) / prevCrossProduct;
-        prevIntersection = prevP1 + t * prevD1;
-    }
+    float prevT = (prevP1P2.x * prevD2.y - prevP1P2.y * prevD2.x) / (prevCrossProduct + 1e-10);
+    float2 prevIntersectionCalc = prevP1 + prevT * prevD1;
+    float2 prevIntersectionFallback = (prevP1 + prevP2) * 0.5f;
+    bool prevParallel = abs(prevCrossProduct) < 1e-5;
+    prevIntersection = select(prevIntersectionCalc, prevIntersectionFallback, prevParallel);
     
+    // next miter joint
     float2 nextP1 = midpoint + joint;
     float2 nextP2 = nextMidpoint - nextJoint;
     
@@ -259,12 +371,11 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float nextCrossProduct = nextD1.x * nextD2.y - nextD1.y * nextD2.x;
 
     float2 nextIntersection;
-    if (abs(nextCrossProduct) < 1e-5) {
-        nextIntersection = (nextP1 + nextP2) * 0.5f;
-    } else {
-        float t = (nextP1P2.x * nextD2.y - nextP1P2.y * nextD2.x) / nextCrossProduct;
-        nextIntersection = nextP1 + t * nextD1;
-    }
+    float nextT = (nextP1P2.x * nextD2.y - nextP1P2.y * nextD2.x) / (nextCrossProduct + 1e-10);
+    float2 nextIntersectionCalc = nextP1 + nextT * nextD1;
+    float2 nextIntersectionFallback = (nextP1 + nextP2) * 0.5f;
+    bool nextParallel = abs(nextCrossProduct) < 1e-5;
+    nextIntersection = select(nextIntersectionCalc, nextIntersectionFallback, nextParallel);
     
     //screenspace
     float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
@@ -311,8 +422,6 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     }
     
 }
-
-
 [[mesh]] void meshPointShader( PointMeshType output,
                                const object_data Payload& payload [[payload]],
                                ushort tid [[thread_position_in_threadgroup]],
@@ -323,7 +432,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
 ) {
     // Each object threadgroup spawns exactly 1 mesh threadgroup so bid is always 0
     uint count = min((uint)threads_per_threadgroup, numEdges);
-    
+
     if (tid == 0) {
         output.set_primitive_count(count);
     }
