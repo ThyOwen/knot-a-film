@@ -2,6 +2,7 @@
 
 #include <metal_stdlib>
 #include "MetalShaders.h"
+#include "curves.h"
 
 using namespace metal;
 
@@ -31,10 +32,24 @@ struct PointVertexOut {
 
 struct VertexOut {
     float4 position [[position]];
+    float2 screenPosition;
 };
 
 struct PrimOut {
     float3 color;
+    
+    float2 leftJoint; // leftJoint
+    float2 prevIntersection; // prevIntersection
+    float2 prevJoint;   // prevJoint
+    
+    float2 rightJoint;// rightP0
+    float2 nextIntersection;// rightP1
+    float2 nextJoint;// rightP2
+    
+    float weight;
+    
+    // Store t-values for the three vertices of this triangle
+    float t0, t1, t2;
 };
 
 struct FragmentIn {
@@ -77,33 +92,6 @@ float3 colorConvert(float h, float s, float v) {
     }
     
     return rgb + float3(m, m, m);
-}
-
-float2 cubicBezierCollapsed(float t, float2 p0, float2 p1, float2 p2) {
-    float u = 1.0 - t;
-
-    float u2 = u * u;
-    float t2 = t * t;
-
-    return
-        u2 * u * p0 +
-        3.0 * u2 * t * p1 +
-        (3.0 * u * t2 + t2 * t) * p2;
-}
-
-float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
-    float u = 1.0 - t;
-
-    float u2 = u * u;
-    float t2 = t * t;
-
-    float b0 = u2;
-    float b1 = 2.0 * w * u * t;
-    float b2 = t2;
-
-    float denom = b0 + b1 + b2;
-
-    return (b0 * p0 + b1 * p1 + b2 * p2) / denom;
 }
 
 // Edge member data stores pairs of of bodies and their matching sources sorted
@@ -416,7 +404,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     // Number of intermediate sample points on the bezier curve (results in numCurveLines + 1 line segments for the curve)
     // Max value depends on mesh limits: must satisfy threads_per_threadgroup * (numCurveLines + 2) <= 256
     // With 32 threads: max numCurveLines = floor(256/32) - 6 = 8
-    constexpr int lod = 5; // 1 is the base case
+    constexpr int lod = 6; // 1 is the base case
      
     if (tid == 0) {
         payload.numEdges = batchCount;
@@ -599,6 +587,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         float2 leftCurvePoint = conicBezier(t, leftJoint, prevIntersection, prevJoint, 3.0f);
         leftBezierIndices[i] = vertBase + i;
         leftBezierVertices[i].position = float4(leftCurvePoint, 0.0, 1.0);
+        leftBezierVertices[i].screenPosition = leftCurvePoint;
         output.set_vertex(leftBezierIndices[i], leftBezierVertices[i]);
     }
     
@@ -609,6 +598,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
         float2 rightCurvePoint = conicBezier(t, rightJoint, nextIntersection, nextJoint, 3.0f);
         rightBezierIndices[i] = vertBase + numPointsPerSide + i;
         rightBezierVertices[i].position = float4(rightCurvePoint, 0.0, 1.0);
+        rightBezierVertices[i].screenPosition = rightCurvePoint;
         output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
     }
 
@@ -637,10 +627,10 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
 ) {
     uint count = payload.numEdges;
     
-    constexpr int numVerticesPerThread = (256 / SIMDGROUP_SIZE);  // 8 total (4 left + 4 right)
-    constexpr int numPointsPerSide = numVerticesPerThread / 2;    // 4 points per side
-    constexpr int numSegments = numPointsPerSide - 1;             // 3 segments
-    constexpr int numTrianglesPerThread = numSegments * 2;        // 2 triangles per segment = 6 total
+    constexpr int numVerticesPerThread = (256 / SIMDGROUP_SIZE);
+    constexpr int numPointsPerSide = numVerticesPerThread / 2;
+    constexpr int numSegments = numPointsPerSide - 1;
+    constexpr int numTrianglesPerThread = numSegments * 2;
     
     if (tid == 0) {
         output.set_primitive_count(count * numTrianglesPerThread);
@@ -649,16 +639,13 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     uint primBase = tid * numTrianglesPerThread;
     uint vertBase = tid * numVerticesPerThread;
     
-    float hue = float(payload.gid[tid]) / float(numEdges);
-    
-    PrimOut p;
-    p.color = colorConvert(hue, 0.8, 1.0);
-    
     uint leftBezierIndices[numPointsPerSide];
     uint rightBezierIndices[numPointsPerSide];
     
     VertexOut leftBezierVertices[numPointsPerSide];
     VertexOut rightBezierVertices[numPointsPerSide];
+    
+    float tValues[numPointsPerSide];
     
     float2 leftJoint = payload.leftJoint[tid];
     float2 rightJoint = payload.rightJoint[tid];
@@ -676,9 +663,12 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     for (int i = 0; i < numPointsPerSide; i++) {
         int globalIdx = startIdx + i;
         float t = (float)globalIdx / (float)(totalPoints - 1);
-        float2 leftCurvePoint = conicBezier(t / 2, leftJoint, prevIntersection, prevJoint, 3.0f);
+        tValues[i] = t / 2.0;  // Store the t-value for this vertex
+        
+        float2 leftCurvePoint = conicBezier(tValues[i], leftJoint, prevIntersection, prevJoint, 3.0f);
         leftBezierIndices[i] = vertBase + i;
         leftBezierVertices[i].position = float4(leftCurvePoint, 0.0, 1.0);
+        leftBezierVertices[i].screenPosition = leftCurvePoint;
         output.set_vertex(leftBezierIndices[i], leftBezierVertices[i]);
     }
     
@@ -686,35 +676,100 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     for (int i = 0; i < numPointsPerSide; i++) {
         int globalIdx = startIdx + i;
         float t = (float)globalIdx / (float)(totalPoints - 1);
-        float2 rightCurvePoint = conicBezier(t / 2, rightJoint, nextIntersection, nextJoint, 3.0f);
+        float tVal = t / 2.0;
+        
+        float2 rightCurvePoint = conicBezier(tVal, rightJoint, nextIntersection, nextJoint, 3.0f);
         rightBezierIndices[i] = vertBase + numPointsPerSide + i;
         rightBezierVertices[i].position = float4(rightCurvePoint, 0.0, 1.0);
+        rightBezierVertices[i].screenPosition = rightCurvePoint;
         output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
     }
 
+    float hue = float(payload.gid[tid]) / float(numEdges);
+    
     // there is a bridge between the left and right sides of the curve
     // each segment is 2 triangles
     for (int i = 0; i < numSegments; ++i) {
         uint triIdx = primBase + (i * 2);
         
+        output.set_vertex(leftBezierIndices[i], leftBezierVertices[i]);
+        output.set_vertex(leftBezierIndices[i + 1], leftBezierVertices[i + 1]);
+        output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
+        
         // triangle: (left[i], left[i+1], right[i])
-        output.set_primitive(triIdx, p);
+        PrimOut p1;
+        p1.color = colorConvert(hue, 0.8, 1.0);
+        p1.leftJoint = leftJoint;
+        p1.prevIntersection = prevIntersection;
+        p1.prevJoint = prevJoint;
+        p1.rightJoint = rightJoint;
+        p1.nextIntersection = nextIntersection;
+        p1.nextJoint = nextJoint;
+        p1.weight = 3.0f;
+        
+        p1.t0 = tValues[i];      // left[i]
+        p1.t1 = tValues[i + 1];  // left[i+1]
+        p1.t2 = tValues[i];      // right[i] - same t as left[i]
+        
+        output.set_primitive(triIdx, p1);
         output.set_index(triIdx * 3 + 0, leftBezierIndices[i]);
         output.set_index(triIdx * 3 + 1, leftBezierIndices[i + 1]);
         output.set_index(triIdx * 3 + 2, rightBezierIndices[i]);
         
+        output.set_vertex(leftBezierIndices[i + 1], leftBezierVertices[i + 1]);
+        output.set_vertex(rightBezierIndices[i + 1], rightBezierVertices[i + 1]);
+        output.set_vertex(rightBezierIndices[i], rightBezierVertices[i]);
+        
+        
         // triangle: (left[i+1], right[i+1], right[i])
-        output.set_primitive(triIdx + 1, p);
+        PrimOut p2;
+        p2.color = colorConvert(hue, 0.8, 1.0);
+        p2.leftJoint = leftJoint;
+        p2.prevIntersection = prevIntersection;
+        p2.prevJoint = prevJoint;
+        p2.rightJoint = rightJoint;
+        p2.nextIntersection = nextIntersection;
+        p2.nextJoint = nextJoint;
+        p2.weight = 3.0f;
+        
+        p2.t0 = tValues[i + 1];  // left[i+1]
+        p2.t1 = tValues[i + 1];  // right[i+1] - same t
+        p2.t2 = tValues[i];      // right[i]
+        
+        output.set_primitive(triIdx + 1, p2);
         output.set_index((triIdx + 1) * 3 + 0, leftBezierIndices[i + 1]);
         output.set_index((triIdx + 1) * 3 + 1, rightBezierIndices[i + 1]);
         output.set_index((triIdx + 1) * 3 + 2, rightBezierIndices[i]);
     }
 }
 
-
-fragment float4 fragmentBody(FragmentIn in [[stage_in]], float2 pointCoord [[point_coord]]) {
+fragment float4 fragmentSimple(FragmentIn in [[stage_in]], float3 barycentricCoord [[barycentric_coord]]) {
     return float4(in.p.color, 1.0);
 }
+
+fragment float4 fragmentBody(FragmentIn in [[stage_in]],
+                             float3 barycentricCoord [[barycentric_coord]] ) {
+    float2 fragPos = in.v.screenPosition;
+
+    float t = barycentricCoord.x * in.p.t0 + barycentricCoord.y * in.p.t1 + barycentricCoord.z * in.p.t2;
+    
+    float2 leftPoint = conicBezier(t, in.p.leftJoint, in.p.prevIntersection, in.p.prevJoint, in.p.weight);
+    float2 rightPoint = conicBezier(t, in.p.rightJoint, in.p.nextIntersection, in.p.nextJoint, in.p.weight);
+    
+    float distToLeft = distance(fragPos, leftPoint);
+    float distToRight = distance(fragPos, rightPoint);
+    
+    float edgeDist = min(distToLeft, distToRight);
+        float strokeWidth = distance(leftPoint, rightPoint);
+    
+    float normalizedDist = edgeDist / (strokeWidth * 0.5);
+    
+    float intensity = 1.0 - saturate(normalizedDist);
+    //float intensity = saturate(1.0 - abs(normalizedDist - 0.9) * 10.0);
+    
+    return float4(intensity * in.p.color, 1.0);
+}
+
 
 #endif
 

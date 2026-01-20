@@ -353,7 +353,7 @@ inline bool isCollide(float2 pos1, float radius1, float2 pos2, float radius2, fl
     return (radius1 + radius2 + collisionThreshold) > getDistance(pos1, pos2);
 }
 
-inline void computeBarnesHuntForce( constant NodeMemberData<float2>& topLeft,
+inline void computeBarnesHutForce( constant NodeMemberData<float2>& topLeft,
                                     constant NodeMemberData<float2>& bottomRight,
                                     constant NodeMemberData<float2>& centerOfMass,
                                     constant NodeMemberData<bool>& isLeaf,
@@ -587,7 +587,7 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
 
     if (useBarnes) {
         float width = bottomRight.data[0].x - topLeft.data[0].x;
-        computeBarnesHuntForce(topLeft, bottomRight, centerOfMass, isLeaf, bodyPos, bodyRadius, bodyAccel, 0, gid, width, physics);
+        computeBarnesHutForce(topLeft, bottomRight, centerOfMass, isLeaf, bodyPos, bodyRadius, bodyAccel, 0, gid, width, physics);
     } else {
         computeDirectSumForce(position, bodyPos, bodyAccel, physics, bid, tid, simd_lane_id, threads_per_threadgroup, threads_per_simdgroup);
     }

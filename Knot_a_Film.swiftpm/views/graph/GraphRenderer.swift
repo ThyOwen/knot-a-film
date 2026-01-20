@@ -119,7 +119,7 @@ public final class GraphRenderer : NSObject, MTKViewDelegate {
         let bodyPipelineDescriptor = MTLMeshRenderPipelineDescriptor()
         bodyPipelineDescriptor.meshFunction = try! library.makeFunction(name: "meshCurveLineShader", constantValues: functionConstants)
         bodyPipelineDescriptor.objectFunction = try! library.makeFunction(name: "objectShader", constantValues: functionConstants)
-        bodyPipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentBody", constantValues: functionConstants)
+        bodyPipelineDescriptor.fragmentFunction = try! library.makeFunction(name: "fragmentSimple", constantValues: functionConstants)
         bodyPipelineDescriptor.maxTotalThreadsPerObjectThreadgroup = 32
         bodyPipelineDescriptor.maxTotalThreadsPerMeshThreadgroup = 32
         bodyPipelineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
