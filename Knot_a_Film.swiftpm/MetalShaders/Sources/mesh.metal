@@ -20,6 +20,10 @@ struct Payload {
     float2 leftJoint[32];
     float2 rightJoint[32];
     float2 nextJoint[32];
+    
+    float prevPeakT[32];
+    float nextPeakT[32];
+    
     uint gid[32];
     uint numEdges;
     uint lod;
@@ -65,11 +69,8 @@ using PointMeshType = metal::mesh<PointVertexOut, PrimOut, 256, 256, metal::topo
 // the limits of the are 256 for vertices and 512 for prims
 // with 32 threads and numCurveLines=8: 32 * 8 = 256 vertices, 32 * 6 = 192 primitive
 
-
 using LineMeshType = metal::mesh<VertexOut, PrimOut, 256, 192, metal::topology::line>;
 using TriangleMeshType = metal::mesh<VertexOut, PrimOut, 256, 192, metal::topology::triangle>;
-
-
 
 float3 colorConvert(float h, float s, float v) {
     float c = v * s;
@@ -254,7 +255,7 @@ float3 colorConvert(float h, float s, float v) {
     uint remaining = select(0u, numEdges - base, base < numEdges);
     uint batchCount = min(remaining, (uint)threads_per_threadgroup);
     
-    //get rid of this the addresses pulled by the shuffles are bogulus and have no default value
+    //  the addresses pulled by the shuffles are bogulus and have no default value
     if (gid >= numEdges) {
         if (tid == 0) {
             //payload.numEdges = batchCount;
@@ -368,6 +369,146 @@ float3 colorConvert(float h, float s, float v) {
     bool nextParallel = abs(nextCrossProduct) < 1e-5;
     nextIntersection = select(nextIntersectionCalc, nextIntersectionFallback, nextParallel);
     
+    
+    constexpr int numIter = 8;
+    
+    float prevPeakT = 0.5;
+    float nextPeakT = 0.5;
+    
+    /*
+     
+    newton's method with two constraints (hot garbage)
+    for (int i = 0; i < numIter; i++) {
+        //float2 conicBezierDerivative(float t, float2 p0, float2 p1, float2 p2, float w)
+            
+        float2 prevValue = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 nextValue = conicBezier(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
+        
+        float2 prevTangent = conicBezierDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 nextTangent = conicBezierDerivative(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
+        
+        float2 prevTangentDerivative = conicBezierSecondDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 nextTangentDerivative = conicBezierSecondDerivative(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
+        
+        float2 connection = nextValue - prevValue;
+
+        if (length(connection) < 1e-6f)
+            break;
+            
+        // jacobian matrix
+        float a = (prevTangentDerivative.x * nextTangent.y) - (prevTangentDerivative.y * nextTangent.x);
+        float b = (prevTangent.x * nextTangentDerivative.y) - (prevTangent.y * nextTangentDerivative.x);
+        float c = (connection.x * prevTangentDerivative.y) - (connection.y * prevTangentDerivative.x);
+        float d = (prevTangent.x * nextTangent.y) - (prevTangent.y * nextTangent.x);
+        
+        float f1 = prevTangent.x * nextTangent.y - prevTangent.y * nextTangent.x; // constraint 1
+        float f2 = connection.x * prevTangent.y - connection.y * prevTangent.x; // constraint 2
+        
+        //float a = dot(-prevTangent, prevTangent) + dot(connection, prevTangentDeriv);
+        //float b = dot(nextTangent, prevTangent);
+        //float c = dot(-prevTangent, nextTangent);
+        //float d = dot(nextTangent, nextTangent) + dot(connection, nextTangentDeriv);
+        
+        //float f1 = dot(connection, prevTangent); // constraint 1
+        //float f2 = dot(connection, nextTangent); // constraint 2
+        
+        float det = a * d - b * c;
+
+        if (abs(f1) < 1e-6f && abs(f2) < 1e-6f)
+            break;
+        
+        if (abs(det) < 1e-6f)
+            break;
+        
+        float dtPrev = (-f1 * d + b * f2) / det;
+        float dtNext = (-a * f2 + f1 * c) / det;
+
+        const float damping = 0.5f;
+        dtPrev *= damping;
+        dtNext *= damping;
+
+        prevPeakT += dtPrev;
+        nextPeakT += dtNext;
+        
+        // Clamp to valid range [0, 1]
+        prevPeakT = clamp(prevPeakT, 0.0f, 1.0f);
+        nextPeakT = clamp(nextPeakT, 0.0f, 1.0f);
+    }
+    */
+    
+    /*
+    float prevPeakT = 0.5;
+    float nextPeakT = 0.5;
+
+    // minimize distance between the two miter curves
+    for (int iter = 0; iter < 15; iter++) {
+        float2 prevCurvePoint = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 nextCurvePoint = conicBezier(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
+        
+        float2 prevTangent = conicBezierDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 nextTangent = conicBezierDerivative(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
+        
+        float2 diff = nextCurvePoint - prevCurvePoint;
+        
+        float grad1 = -dot(prevTangent, diff);
+        float grad2 = dot(nextTangent, diff);
+        
+        prevPeakT += grad1 * 0.01;
+        nextPeakT += grad2 * 0.01;
+        
+        prevPeakT = clamp(prevPeakT, 0.05f, 0.95f);
+        nextPeakT = clamp(nextPeakT, 0.05f, 0.95f);
+        
+        if (length(diff) < 0.001)
+            break;
+    }
+    */
+
+    for (int iter = 0; iter < numIter; iter++) {
+        float2 curvePoint = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 tangent = conicBezierDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        float2 tangentDerivative = conicBezierSecondDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
+        
+        float2 toIntersection = prevIntersection - curvePoint;
+        
+        // tangent to miter intersection to be perpendicular
+        float dotProduct = dot(tangent, toIntersection); // want dot(tangent, toIntersection) = 0
+        
+        if (abs(dotProduct) < 0.0001)
+            break;
+        
+        float dDot_dt = dot(tangentDerivative, toIntersection) - dot(tangent, tangent);
+        
+        // Newton step
+        float dt = -dotProduct / (dDot_dt + 1e-8);
+        dt = clamp(dt, -0.1f, 0.1f);
+        
+        prevPeakT += dt;
+        prevPeakT = clamp(prevPeakT, 0.0f, 1.0f);
+    }
+
+    for (int iter = 0; iter < numIter; iter++) {
+        float2 curvePoint = conicBezier(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
+        float2 tangent = conicBezierDerivative(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
+        float2 tangentDerivative = conicBezierSecondDerivative(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
+        
+        float2 toIntersection = nextIntersection - curvePoint;
+        
+        // tangent to miter intersection to be perpendicular
+        float dotProduct = dot(tangent, toIntersection); // want dot(tangent, toIntersection) = 0
+        
+        if (abs(dotProduct) < 0.0001)
+            break;
+        
+        float dDot_dt = dot(tangentDerivative, toIntersection) - dot(tangent, tangent);
+        
+        float dt = -dotProduct / (dDot_dt + 1e-8);
+        dt = clamp(dt, -0.1f, 0.1f);
+        
+        nextPeakT += dt;
+        nextPeakT = clamp(nextPeakT, 0.0f, 1.0f);
+    }
+    
     //screenspace
     float2 origin_t = (sourcePoint * transform.scale) + transform.offset;
 
@@ -375,8 +516,8 @@ float3 colorConvert(float h, float s, float v) {
     float2 nextIntersection_t = (nextIntersection * transform.scale) + transform.offset;
     
     float2 prevJoint_t = (prevP1 * transform.scale) + transform.offset;  // prevMidpoint + prevJoint
-    float2 leftJoint_t = (prevP2 * transform.scale) + transform.offset;      // midpoint - joint
-    float2 rightJoint_t = (nextP1 * transform.scale) + transform.offset;      // midpoint + joint
+    float2 leftJoint_t = (prevP2 * transform.scale) + transform.offset;  // midpoint - joint
+    float2 rightJoint_t = (nextP1 * transform.scale) + transform.offset; // midpoint + joint
     float2 nextJoint_t = (nextP2 * transform.scale) + transform.offset;  // nextMidpoint - nextJoint
     
     float2 prevMidpoint_t = (prevMidpoint * transform.scale) + transform.offset;
@@ -386,7 +527,6 @@ float3 colorConvert(float h, float s, float v) {
     
     payload.origin[tid] = origin_t;
     payload.midpoint[tid] = midpoint_t;
-    payload.gid[tid] = gid;
     
     payload.prevIntersection[tid] = prevIntersection_t;
     payload.nextIntersection[tid] = nextIntersection_t;
@@ -398,7 +538,10 @@ float3 colorConvert(float h, float s, float v) {
     
     payload.prevMidpoint[tid] = prevMidpoint_t;
     payload.nextMidpoint[tid] = nextMidpoint_t;
-
+    
+    payload.gid[tid] = gid;
+    payload.prevPeakT[tid] = prevPeakT;
+    payload.nextPeakT[tid] = nextPeakT;
 
     // Dispatch logic
     // Number of intermediate sample points on the bezier curve (results in numCurveLines + 1 line segments for the curve)
@@ -424,28 +567,57 @@ float3 colorConvert(float h, float s, float v) {
                                ushort threads_per_threadgroup [[threads_per_threadgroup]],
                                ushort threads_per_simdgroup [[threads_per_simdgroup]]
 ) {
-    // Each object threadgroup spawns exactly 1 mesh threadgroup so bid is always 0
     uint count = min((uint)threads_per_threadgroup, numEdges);
 
     if (tid == 0) {
-        output.set_primitive_count(count);
+        output.set_primitive_count(2 * count);
     }
+
+    if (tid >= count)
+        return;
     
-    //if (tid < count) {
-    PointVertexOut v;
-    v.position = float4(payload.nextIntersection[tid], 0.0, 1.0);
-    v.size = 8.0;
-    output.set_vertex(tid, v);
-    
-    // Map gid to hue (0 to 1)
+    PointVertexOut prevV;
+    PointVertexOut nextV;
+
+    float2 prevConicValue = conicBezier(
+        payload.prevPeakT[tid],
+        payload.prevJoint[tid],
+        payload.prevIntersection[tid],
+        payload.leftJoint[tid],
+        3.0f
+    );
+
+    float2 nextConicValue = conicBezier(
+        payload.nextPeakT[tid],
+        payload.nextJoint[tid],
+        payload.nextIntersection[tid],
+        payload.rightJoint[tid],
+        3.0f
+    );
+
+    prevV.position = float4(prevConicValue, 0.0, 1.0);
+    nextV.position = float4(nextConicValue, 0.0, 1.0);
+
+    prevV.size = 8.0;
+    nextV.size = 8.0;
+
+    output.set_vertex(2 * tid + 0, prevV);
+    output.set_vertex(2 * tid + 1, nextV);
+
     float hue = (float)payload.gid[tid] / (float)numEdges;
-    
-    PrimOut p;
-    p.color = colorConvert(hue, 0.8, 1.0);
-    output.set_primitive(tid, p);
-    output.set_index(tid, tid);
-    //}
+
+    PrimOut p0;
+    PrimOut p1;
+    p0.color = colorConvert(hue, 0.8, 1.0);
+    p1.color = colorConvert(hue, 0.8, 1.0);
+
+    output.set_primitive(2 * tid + 0, p0);
+    output.set_primitive(2 * tid + 1, p1);
+
+    output.set_index(2 * tid + 0, 2 * tid + 0);
+    output.set_index(2 * tid + 1, 2 * tid + 1);
 }
+
 
 
 [[mesh]] void meshLineShader( LineMeshType output,
