@@ -4,7 +4,7 @@
 
 using namespace metal;
 
-float2 cubicBezierCollapsed(float t, float2 p0, float2 p1, float2 p2) {
+static float2 cubicBezierCollapsed(float t, float2 p0, float2 p1, float2 p2) {
     float u = 1.0 - t;
 
     float u2 = u * u;
@@ -18,7 +18,7 @@ float2 cubicBezierCollapsed(float t, float2 p0, float2 p1, float2 p2) {
 
 
 //MARK: - Conic
-float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
+static float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     float u = 1.0 - t;
 
     float u2 = u * u;
@@ -33,7 +33,7 @@ float2 conicBezier(float t, float2 p0, float2 p1, float2 p2, float w) {
     return (b0 * p0 + b1 * p1 + b2 * p2) / denom;
 }
 
-float2 conicBezierDerivative(float t, float2 p0, float2 p1, float2 p2, float w) {
+static float2 conicBezierDerivative(float t, float2 p0, float2 p1, float2 p2, float w) {
     float u = 1.0 - t;
     
     // basis functions
@@ -56,7 +56,7 @@ float2 conicBezierDerivative(float t, float2 p0, float2 p1, float2 p2, float w) 
     return (numeratorDerivative * denom - numerator * denomDerivative) / (denom * denom);
 }
 
-float2 conicBezierSecondDerivative(float t, float2 p0, float2 p1, float2 p2, float w) {
+static float2 conicBezierSecondDerivative(float t, float2 p0, float2 p1, float2 p2, float w) {
     float u = 1.0 - t;
     
     // basis functions

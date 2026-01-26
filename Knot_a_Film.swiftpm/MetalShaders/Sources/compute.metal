@@ -2,6 +2,7 @@
 
 #include <metal_stdlib>
 #include "MetalShaders.h"
+#include "curves.h"
 
 using namespace metal;
 
@@ -23,7 +24,7 @@ kernel void resetKernel(device NodeMemberData<float2>& topLeft  [[buffer(NODE_TO
     if (gid < uint(topLeft.size)) {
         topLeft.data[gid] = {INFINITY, -INFINITY};
         bottomRight.data[gid] = {-INFINITY, INFINITY};
-        centerOfMass.data[gid] = {-1.0h, -1.0h};
+        centerOfMass.data[gid] = {-1.0f, -1.0f};
         totalMass.data[gid] = 0.0;
         isLeaf.data[gid] = true;
         start.data[gid] = -1;
@@ -201,8 +202,7 @@ inline void groupBodies(constant BodyMemberData<float>& mass_in,
                         ushort threads_per_threadgroup
 ) {
     threadgroup int* count2 = &count[4];
-    for (int i = start + tid; i <= end; i += threads_per_threadgroup)
-    {
+    for (int i = start + tid; i <= end; i += threads_per_threadgroup) {
         float2 pos = position_in.data[i];
         int q = getQuadrant(topLeft, bottomRight, pos.x, pos.y);
         int dest = atomic_fetch_add_explicit((threadgroup atomic_int*)&count2[q - 1], 1, memory_order_relaxed);
@@ -338,19 +338,12 @@ kernel void constructQuadTreeKernel(device NodeMemberData<float2>& topLeft [[buf
     }
 }
 
-template<typename N>
-inline float getDistance( N pos1, N pos2 ) {
-    N delta = pos1 - pos2;
-    N deltaSquared = pow(delta, 2);
-    return sqrt(deltaSquared.x + deltaSquared.y);
-}
-
 inline bool isCollide(float2 pos1, float radius1, float2 cm, float collisionThreshold ) {
-    return (radius1 * 2 + collisionThreshold) > getDistance(pos1, cm);
+    return (radius1 * 2 + collisionThreshold) > distance(pos1, cm);
 }
 
 inline bool isCollide(float2 pos1, float radius1, float2 pos2, float radius2, float collisionThreshold ) {
-    return (radius1 + radius2 + collisionThreshold) > getDistance(pos1, pos2);
+    return (radius1 + radius2 + collisionThreshold) > distance(pos1, pos2);
 }
 
 inline void computeBarnesHutForce( constant NodeMemberData<float2>& topLeft,
@@ -378,7 +371,7 @@ inline void computeBarnesHutForce( constant NodeMemberData<float2>& topLeft,
         uint curIndex = stack[stackIdx];
         float curWidth = widthStack[stackIdx];
         
-        if (curIndex >= topLeft.size || curIndex < 0.0h) {
+        if (curIndex >= topLeft.size) {
             continue;
         }
         
@@ -386,7 +379,7 @@ inline void computeBarnesHutForce( constant NodeMemberData<float2>& topLeft,
         bool curIsLeaf = isLeaf.data[curIndex];
 
         if (curIsLeaf) {
-             if (curCOM.x != -1.0h) {
+             if (curCOM.x != -1.0f) {
                  float2 delta = curCOM - bodyPos;
                  float distanceSquared = dot(delta, delta) + physics.epsilon;
                  float distance = sqrt(distanceSquared);
@@ -400,7 +393,7 @@ inline void computeBarnesHutForce( constant NodeMemberData<float2>& topLeft,
              continue;
          }
 
-        float sd = curWidth / getDistance(bodyPos, curCOM);
+        float sd = curWidth / distance(bodyPos, curCOM);
         if (sd < physics.theta) {
             if (!isCollide(bodyPos, bodyRadius, curCOM, physics.collisionThreshold)) {
                 float2 delta = curCOM - bodyPos;
@@ -489,61 +482,31 @@ inline void computeEdgesForce( const thread float2& bodyPos,
                                constant BodyMemberData<uint>& offsets,
                               
                                constant EdgeMemberData<uint>& edgesIndiciesData,
-                               device EdgeMemberData<uint>& edgeAnglesData,
                               
                                constant PhysicsParams &physics,
-                               uint bid,
-                               ushort tid,
-                               ushort simd_lane_id,
-                               ushort threads_per_threadgroup,
-                               ushort threads_per_simdgroup
+                               uint bodyOriginalIdx
 ) {
-    uint gid = bid * threads_per_threadgroup + tid;
-    
-    uint startIdx = offsets.data[gid];
-    uint endIdx = offsets.data[gid + 1];
+    uint startIdx = offsets.data[bodyOriginalIdx];
+    uint endIdx = offsets.data[bodyOriginalIdx + 1];
     uint numConns = endIdx - startIdx;
     
     float2 force = { 0.0f, 0.0f };
+    
+    for (uint edgeIdx = 0; edgeIdx < numConns; ++edgeIdx) {
+        uint otherOriginalIdx = edgesIndiciesData.data[startIdx + edgeIdx];
+        float2 otherPos = position.data[otherOriginalIdx];
         
-    for (int base = 0; base < (int)numConns; base += threads_per_simdgroup) {
-        uint baseIdx = base + simd_lane_id;
+        float2 delta = otherPos - bodyPos;
+        float distanceSquared = dot(delta, delta) + physics.epsilon;
+        float dist = sqrt(distanceSquared);
         
-        float2 otherPos;
-        if (baseIdx < numConns) {
-            uint otherIdx = edgesIndiciesData.data[startIdx + baseIdx];
-            otherPos = position.data[otherIdx];
-        } else {
-            otherPos = { 0.0f, 0.0f };
+        if (dist > physics.epsilon && computeEdges) {
+            float2 direction = delta / dist;
+            float restLength = physics.edgeAttraction;
+            float displacement = dist - restLength;
+            float springMagnitude = physics.springConstant * displacement;
+            force += direction * springMagnitude;
         }
-        
-        simdgroup_barrier(mem_flags::mem_threadgroup);
-        
-        // compute forces
-        for (int lane = 0; lane < threads_per_simdgroup; ++lane) {
-            uint edgeIdx = base + lane;
-            
-            if (edgeIdx >= numConns)
-                continue;
-
-            float2 pos = simd_broadcast(otherPos, lane);
-            
-            float2 delta = pos - bodyPos;
-            float distanceSquared = dot(delta, delta) + physics.epsilon;
-            float distance = sqrt(distanceSquared);
-            
-            if (distance > physics.epsilon && computeEdges && edgeIdx < numConns) {
-                float2 direction = delta / distance;
-                float restLength = physics.edgeAttraction;
-                float displacement = distance - restLength;
-                float springMagnitude = physics.springConstant * displacement;
-                force += direction * springMagnitude;
-            }
-
-            simdgroup_barrier(mem_flags::mem_threadgroup);
-        }
-        
-        simdgroup_barrier(mem_flags::mem_threadgroup);
     }
     
     bodyAccel += force;
@@ -553,7 +516,7 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
                                constant NodeMemberData<float2>& bottomRight [[buffer(NODE_BOTTOM_RIGHT_IDX)]],
                                constant NodeMemberData<float2>& centerOfMass [[buffer(NODE_CENTER_OF_MASS_IDX)]],
                                constant NodeMemberData<bool>& isLeaf [[buffer(NODE_IS_LEAF_IDX)]],
-                               //Body
+                               //bodies
                                device BodyMemberData<float>& mass [[buffer(BODY_MASS_IDX)]],
                                constant BodyMemberData<float>& radius [[buffer(BODY_RADIUS_IDX)]],
                                device BodyMemberData<float2>& position [[buffer(BODY_POSITION_IDX)]],
@@ -561,7 +524,7 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
                                device BodyMemberData<float2>& acceleration [[buffer(BODY_ACCELERATION_IDX)]],
                                device BodyMemberData<uint>& initialIdx [[buffer(BODY_INITIAL_IDX_IDX)]],
                                constant BodyMemberData<uint>& offsets [[buffer(BODY_EDGE_OFFSETS_IDX)]],
-                               //Connections
+                               //edges
                                constant EdgeMemberData<uint>& edgeTerminationsData [[buffer(EDGE_TERMINATIONS_IDX)]],
                                device EdgeMemberData<uint>& edgeAnglesData [[buffer(EDGE_ANGLES_IDX)]],
                                
@@ -592,8 +555,8 @@ kernel void computeForceKernel(constant NodeMemberData<float2>& topLeft [[buffer
         computeDirectSumForce(position, bodyPos, bodyAccel, physics, bid, tid, simd_lane_id, threads_per_threadgroup, threads_per_simdgroup);
     }
     
-    if (gid < edgeTerminationsData.size) {
-        computeEdgesForce(bodyPos, bodyAccel, position, offsets, edgeTerminationsData, edgeAnglesData, physics, bid, tid, simd_lane_id, threads_per_threadgroup, threads_per_simdgroup);
+    if (bodyInitialIdx < edgeTerminationsData.size) {
+        computeEdgesForce(bodyPos, bodyAccel, position, offsets, edgeTerminationsData, physics, bodyInitialIdx);
     }
     
     bodyVel *= physics.damping;
@@ -657,10 +620,10 @@ kernel void computeEdgeAngles(constant BodyMemberData<float2>& position [[buffer
         float angle = atan2(delta.y, delta.x);
         float normalizedAngle = (angle + M_PI_F) / (2.0f * M_PI_F);
         edgeAngles.data[i] = floatToUInt(normalizedAngle);
+        //edgeAngles.data[i] = normalizedAngle;
     }
 }
 
-constant int ITEMS = 32;
 
 kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedData [[buffer(EDGE_TERMINATIONS_SORTED_IDX)]],
                             constant EdgeMemberData<uint>& edgeAnglesData [[buffer(EDGE_ANGLES_IDX)]],
@@ -679,6 +642,8 @@ kernel void sortEdgeAngles( device EdgeMemberData<uint>& edgeTerminationsSortedD
     
     if (numConns == 0)
         return;
+    
+    constexpr int ITEMS = 32;
     
     uint localKeys[ITEMS];
     uint localValues[ITEMS];

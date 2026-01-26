@@ -279,7 +279,6 @@ float3 colorConvert(float h, float s, float v) {
     float2 perpendicular = float2(-delta.y, delta.x) / len;
     float2 joint = perpendicular * width;
 
-    // Get SIMD shuffled values
     float2 simdPrevMidpoint = simd_shuffle_up(midpoint, 1);
     float2 simdNextMidpoint = simd_shuffle_down(midpoint, 1);
     float2 simdPrevJoint = simd_shuffle_up(joint, 1);
@@ -369,100 +368,10 @@ float3 colorConvert(float h, float s, float v) {
     bool nextParallel = abs(nextCrossProduct) < 1e-5;
     nextIntersection = select(nextIntersectionCalc, nextIntersectionFallback, nextParallel);
     
-    
     constexpr int numIter = 8;
     
     float prevPeakT = 0.5;
     float nextPeakT = 0.5;
-    
-    /*
-     
-    newton's method with two constraints (hot garbage)
-    for (int i = 0; i < numIter; i++) {
-        //float2 conicBezierDerivative(float t, float2 p0, float2 p1, float2 p2, float w)
-            
-        float2 prevValue = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
-        float2 nextValue = conicBezier(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
-        
-        float2 prevTangent = conicBezierDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
-        float2 nextTangent = conicBezierDerivative(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
-        
-        float2 prevTangentDerivative = conicBezierSecondDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
-        float2 nextTangentDerivative = conicBezierSecondDerivative(nextPeakT, nextP2, nextIntersection, nextP1, 3.0f); // invert?
-        
-        float2 connection = nextValue - prevValue;
-
-        if (length(connection) < 1e-6f)
-            break;
-            
-        // jacobian matrix
-        float a = (prevTangentDerivative.x * nextTangent.y) - (prevTangentDerivative.y * nextTangent.x);
-        float b = (prevTangent.x * nextTangentDerivative.y) - (prevTangent.y * nextTangentDerivative.x);
-        float c = (connection.x * prevTangentDerivative.y) - (connection.y * prevTangentDerivative.x);
-        float d = (prevTangent.x * nextTangent.y) - (prevTangent.y * nextTangent.x);
-        
-        float f1 = prevTangent.x * nextTangent.y - prevTangent.y * nextTangent.x; // constraint 1
-        float f2 = connection.x * prevTangent.y - connection.y * prevTangent.x; // constraint 2
-        
-        //float a = dot(-prevTangent, prevTangent) + dot(connection, prevTangentDeriv);
-        //float b = dot(nextTangent, prevTangent);
-        //float c = dot(-prevTangent, nextTangent);
-        //float d = dot(nextTangent, nextTangent) + dot(connection, nextTangentDeriv);
-        
-        //float f1 = dot(connection, prevTangent); // constraint 1
-        //float f2 = dot(connection, nextTangent); // constraint 2
-        
-        float det = a * d - b * c;
-
-        if (abs(f1) < 1e-6f && abs(f2) < 1e-6f)
-            break;
-        
-        if (abs(det) < 1e-6f)
-            break;
-        
-        float dtPrev = (-f1 * d + b * f2) / det;
-        float dtNext = (-a * f2 + f1 * c) / det;
-
-        const float damping = 0.5f;
-        dtPrev *= damping;
-        dtNext *= damping;
-
-        prevPeakT += dtPrev;
-        nextPeakT += dtNext;
-        
-        // Clamp to valid range [0, 1]
-        prevPeakT = clamp(prevPeakT, 0.0f, 1.0f);
-        nextPeakT = clamp(nextPeakT, 0.0f, 1.0f);
-    }
-    */
-    
-    /*
-    float prevPeakT = 0.5;
-    float nextPeakT = 0.5;
-
-    // minimize distance between the two miter curves
-    for (int iter = 0; iter < 15; iter++) {
-        float2 prevCurvePoint = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
-        float2 nextCurvePoint = conicBezier(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
-        
-        float2 prevTangent = conicBezierDerivative(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
-        float2 nextTangent = conicBezierDerivative(nextPeakT, nextP1, nextIntersection, nextP2, 3.0f);
-        
-        float2 diff = nextCurvePoint - prevCurvePoint;
-        
-        float grad1 = -dot(prevTangent, diff);
-        float grad2 = dot(nextTangent, diff);
-        
-        prevPeakT += grad1 * 0.01;
-        nextPeakT += grad2 * 0.01;
-        
-        prevPeakT = clamp(prevPeakT, 0.05f, 0.95f);
-        nextPeakT = clamp(nextPeakT, 0.05f, 0.95f);
-        
-        if (length(diff) < 0.001)
-            break;
-    }
-    */
 
     for (int iter = 0; iter < numIter; iter++) {
         float2 curvePoint = conicBezier(prevPeakT, prevP1, prevIntersection, prevP2, 3.0f);
